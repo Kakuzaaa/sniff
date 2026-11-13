@@ -2,9 +2,9 @@
   <h1>🌐 Domain Sniffer Pro</h1>
   <p>Userscript для <b>Tampermonkey / Violentmonkey</b>: собирает все домены сайта, определяет блокировки (DPI / IP / 16-20КБ / замедление), показывает, <b>кто идёт через прокси, а кто напрямую</b>, и проверяет доступность <b>по регионам РФ</b>.</p>
 
-[![Версия](https://img.shields.io/github/v/tag/Kakuzaaa/sniff?label=Версия&sort=semver&color=blue)](https://github.com/Kakuzaaa/sniff/releases/latest)
-[![Лицензия](https://img.shields.io/github/license/Kakuzaaa/sniff?label=Лицензия&color=success)](LICENSE)
-[![Размер](https://img.shields.io/github/repo-size/Kakuzaaa/sniff?label=Размер)]()
+[![Версия](https://img.shields.io/github/v/tag/Kakuzaaa/sniff?label=%D0%92%D0%B5%D1%80%D1%81%D0%B8%D1%8F&sort=semver&color=blue)](https://github.com/Kakuzaaa/sniff/releases/latest)
+[![Лицензия](https://img.shields.io/github/license/Kakuzaaa/sniff?label=%D0%9B%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F&color=success)](LICENSE)
+[![Размер](https://img.shields.io/github/repo-size/Kakuzaaa/sniff?label=%D0%A0%D0%B0%D0%B7%D0%BC%D0%B5%D1%80)]()
 
 [Установка](#-установка) ·
 [Возможности](#-возможности) ·
