@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      3.7
+// @version      3.8
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -30,21 +30,22 @@
      в верхний фрейм через postMessage — так ловятся домены встроенных
      сторонних виджетов (плееры, капча и т.п.).
 
-  ПРОВЕРКА БЛОКИРОВОК (кнопка «🚫 Чек», нужен Tampermonkey/Violentmonkey):
+  ПРОВЕРКА БЛОКИРОВОК (кнопка «Проверить», нужен Tampermonkey/Violentmonkey):
    1. Реестр: списки-зеркала antifilter.download (domains.lst + subnet.lst
       + ip.lst), кэш на 12 ч в GM-хранилище. Проверяем и домен, и его IP
       (IP резолвим через DNS-over-HTTPS — так видны блоки хостингов
       типа Hetzner/Cloudflare по подсетям).
-   2. Живые пробы GM_xmlhttpRequest к самому домену (без cookie):
-      • сброс соединения сразу        → ⛔ похоже на DPI (по SNI/домену);
-      • HTTPS сброс, а HTTP отвечает  → ⛔ почти наверняка DPI по SNI;
-      • нет ответа (таймаут)          → 🕳 полная блокировка по IP;
-      • обрыв после ~12–64КБ          → ✂️ «частичная» блокировка 16–20КБ;
-      • устойчивая скорость < 16КБ/с  → 🐢 замедление (троттлинг). Меряем
+   2. Живые пробы GM_xmlhttpRequest к самому домену (без cookie), бейдж
+      статуса = цветная точка + короткая подпись:
+      • сброс соединения сразу        → ● DPI — похоже на DPI (по SNI);
+      • HTTPS сброс, а HTTP отвечает  → ● DPI — почти наверняка DPI по SNI;
+      • нет ответа (таймаут)          → ● IP — полная блокировка по IP;
+      • обрыв после ~12–64КБ          → ● 16-20КБ — «частичная» блокировка;
+      • устойчивая скорость < 16КБ/с  → ● медленно — замедление. Меряем
         ПОСЛЕ первых 16КБ (TTFB/«сервер думает» не учитывается) и только
         если получено ≥48КБ; таймаут с данными = «очень медленно» или
         «встало после NКБ», а НЕ «полная блокировка»;
-      • успешный ответ                → ✅ доступен.
+      • успешный ответ                → ● OK — доступен.
    Способ блокировки в реестре не публикуется, поэтому тип определяется
    по фактическому поведению сети У ВАШЕГО провайдера — это эвристика.
 
@@ -53,15 +54,15 @@
      (sing-box / clash / v2rayN с clash-api) включён Clash API
      (external_controller, обычно порт 9090 — в Podkop это «YACD /
      дашборд»), скрипт читает /connections и показывает для каждого
-     домена: 🚀 через какую цепочку прокси он идёт или ⬇ напрямую и
+     домена: «через прокси» (с какой цепочкой) или «напрямую» и
      по какому правилу. Проба из «Чека» сама создаёт соединение,
      поэтому маршрут определяется и для доменов, которые сайт не грузит.
    • Без Clash API — только косвенно: сравниваем IP, который видят
      зарубежный и RU-сервис (детект сплит-маршрутизации и VPN-выхода).
      Поточечный маршрут в этом случае узнать нельзя.
-   • 🔴 «заблокирован и НЕ в прокси» — домен блокируется, но в
+   • красный бейдж «не в прокси» — домен блокируется, но в
      прокси-лист роутера не попал: вот почему сайт не работает.
-   • БЕЗ Clash API — два косвенных признака (метки 🚀? / ⬇?):
+   • БЕЗ Clash API — два косвенных признака (метки со знаком «?»):
      1) реестр + проба: домен в реестре, но доступен → скорее идёт
         через прокси; в реестре и блокируется → скорее напрямую;
      2) RU-хостинг + задержка: <60мс — как локально (напрямую),
@@ -69,7 +70,7 @@
         Гео IP берётся у ip-api.com, задержка — из живой пробы.
      CDN и европейские цели так не различить (RTT совпадает).
 
-  РЕГИОНАЛЬНАЯ ПРОВЕРКА (кнопка «🌍 Рег.» или 🌍 на строке домена):
+  РЕГИОНАЛЬНАЯ ПРОВЕРКА (кнопка «Регионы» или иконка глобуса на строке):
    • открытый API cheburcheck.ru: статика /api/v1/check (реестр +
      списки CDN-хостеров: Hetzner, Cloudflare и др.) и живой SSE-скан
      /api/v1/probe — десятки сканеров в регионах РФ присылают вердикты:
@@ -99,7 +100,7 @@
     probeMaxBody: 256 * 1024,   // получили столько байт → домен живой, пробу прерываем
     partialMin: 12 * 1024,      // «частичная» блокировка: обрыв тела в диапазоне…
     partialMax: 64 * 1024,      // …12–64КБ (типичный случай — 16–20КБ)
-    slowBytesPerSec: 16 * 1024, // устойчивая скорость ниже → 🐢 замедление
+    slowBytesPerSec: 16 * 1024, // устойчивая скорость ниже → «медленно» (замедление)
     slowSkipBytes: 16 * 1024,   // первые 16КБ не меряем (TTFB, «сервер думает»)
     slowMinBytes: 48 * 1024,    // меньше этого объёма скорость не измеряем вообще
     stallSilentMs: 2500,        // данные пришли и замолчали надолго → «встало», не «медленно»
@@ -328,7 +329,7 @@
     try {
       const st = {};
       for (const [h, s] of info) if (s && s.status) st[h] = {
-        i: s.status.icons, t: s.status.tag, b: s.status.blocked ? 1 : 0,
+        p: s.status.primary || '', t: s.status.tag, b: s.status.blocked ? 1 : 0,
         r: s.route ? { d: s.route.direct ? 1 : 0, v: s.route.via, f: s.route.inferred ? 1 : 0 } : null,
         c: s.reg && s.reg.total ? { w: s.reg.winner, n: s.reg.total, c: s.reg.counts } : null,
         s: s.regStatic ? { b: s.regStatic.blocked ? 1 : 0, o: s.regStatic.org, l: s.regStatic.loc, cd: s.regStatic.cdn } : null,
@@ -350,7 +351,7 @@
       for (const h of Object.keys(st)) {
         const r = st[h].r, c = st[h].c, s = st[h].s;
         info.set(h, {
-          status: { icons: st[h].i, tag: st[h].t, blocked: !!st[h].b },
+          status: { primary: st[h].p || '', tag: st[h].t, blocked: !!st[h].b },
           busy: false,
           route: r ? { direct: !!r.d, via: r.v || '', rule: '', inferred: !!r.f } : null,
           reg: c && c.n ? { counts: c.c || {}, total: c.n, winner: c.w, cached: true } : null,
@@ -466,9 +467,9 @@
       if (save) gmSet('__dsnf3_route', { url: ROUTE.base, secret: ROUTE.secret });
       startRoutePolling();
       echoCheck();
-      return '✅ Подключено: ' + ROUTE.base + (ROUTE.ver ? ' (ядро ' + ROUTE.ver + ')' : '');
+      return 'Подключено: ' + ROUTE.base + (ROUTE.ver ? ' (ядро ' + ROUTE.ver + ')' : '');
     }
-    return '❌ Не отвечает. Включите Clash API/дашборд на роутере (обычно порт 9090) и проверьте адрес.';
+    return 'Не отвечает. Включите Clash API/дашборд на роутере (обычно порт 9090) и проверьте адрес.';
   };
   const detectRoute = async () => {
     if (!hasGM) return;
@@ -543,9 +544,9 @@
     if (!e || (!e.cf && !e.ru)) return '';
     const f = e.cf ? 'мир видит ' + (e.cf.ip || '?') + (e.cf.loc ? ' (' + e.cf.loc + ')' : '') : '';
     const r = e.ru ? ' · RU видит ' + (e.ru.ip || '?') + (e.ru.loc ? ' (' + e.ru.loc + ')' : '') : '';
-    if (e.cf && e.ru && e.cf.ip && e.ru.ip && e.cf.ip !== e.ru.ip) return '🌐 ' + f + r + ' → сплит-маршрутизация';
-    if (e.cf && e.cf.loc && e.cf.loc !== 'RU') return '🌐 ' + f + r + ' → выход через VPN/прокси';
-    return '🌐 ' + f + r;
+    if (e.cf && e.ru && e.cf.ip && e.ru.ip && e.cf.ip !== e.ru.ip) return 'Выход: ' + f + r + ' → сплит-маршрутизация';
+    if (e.cf && e.cf.loc && e.cf.loc !== 'RU') return 'Выход: ' + f + r + ' → через VPN/прокси';
+    return 'Выход: ' + f + r;
   };
 
   // ────────────────── ГЕО IP (для латентностной эвристики маршрута) ──────────────────
@@ -569,13 +570,13 @@
   const chbQueue = [];
 
   const CHB_V = {
-    sni_block:    { i: '⛔', t: 'SNI-блок (DPI)' },
-    tspu_block:   { i: '🕳', t: 'ТСПУ-блок (IP)' },
-    dns_spoofing: { i: '🌀', t: 'подмена DNS' },
-    cdn_block:    { i: '✂️', t: 'CDN-блок (16-20КБ)' },
-    whitelist:    { i: '🟢', t: 'в белом списке' },
-    ok:           { i: '✅', t: 'доступен' },
-    uncertain:    { i: '❔', t: 'неясно' },
+    sni_block:    { t: 'SNI-блок (DPI)' },
+    tspu_block:   { t: 'ТСПУ-блок (IP)' },
+    dns_spoofing: { t: 'подмена DNS' },
+    cdn_block:    { t: 'CDN-блок (16-20КБ)' },
+    whitelist:    { t: 'в белом списке' },
+    ok:           { t: 'доступен' },
+    uncertain:    { t: 'неясно' },
   };
   const CHB_PRIO = ['tspu_block', 'sni_block', 'dns_spoofing', 'whitelist', 'cdn_block', 'ok', 'uncertain'];
 
@@ -694,18 +695,18 @@
   };
 
   const chbTag = (st) => {
-    if (st.chbBusy) return '🌍 сканирую по регионам РФ…' + (CHB.parts ? ' (' + CHB.parts + (CHB.online ? '/' + CHB.online : '') + ')' : '');
-    if (st.regErr) return '🌍 ' + st.regErr;
+    if (st.chbBusy) return 'Регион-чек: сканирую…' + (CHB.parts ? ' (' + CHB.parts + (CHB.online ? '/' + CHB.online : '') + ' сканеров)' : '');
+    if (st.regErr) return 'Регион-чек: ' + st.regErr;
     if (!st.reg || !st.reg.total) return '';
     const a = st.reg;
     const w = CHB_V[a.winner];
-    const top = CHB_PRIO.filter((v) => a.counts[v]).slice(0, 4).map((v) => (CHB_V[v] ? CHB_V[v].i : '?') + a.counts[v]).join(' ');
-    let s = '🌍 ' + (w ? w.t : 'неясно') + ' [' + top + '] · ' + a.total + ' рег.' + (a.cached ? ' (кэш)' : '');
+    const top = CHB_PRIO.filter((v) => a.counts[v]).slice(0, 4).map((v) => (CHB_V[v] ? CHB_V[v].t : '?') + ' ' + a.counts[v]).join(', ');
+    let s = 'Регионы РФ: ' + (w ? w.t : 'неясно') + ' (' + top + ') · ' + a.total + ' сканеров' + (a.cached ? ' · кэш' : '');
     const rs = st.regStatic;
     if (rs) {
-      if (rs.blocked) s += ' · 📋 в списках cheburcheck';
-      if (rs.cdn && rs.cdn.length) s += ' · 🖥 ' + rs.cdn.join(', ');
-      else if (rs.loc) s += ' · 🖥 ' + rs.loc;
+      if (rs.blocked) s += ' · в списках cheburcheck';
+      if (rs.cdn && rs.cdn.length) s += ' · хостинг: ' + rs.cdn.join(', ');
+      else if (rs.loc) s += ' · хостинг: ' + rs.loc;
     }
     return s;
   };
@@ -760,12 +761,23 @@
     } catch (e) { finish({ kind: 'err', err: String(e) }); }
   });
 
+  // сетевой вердикт → бейдж {текст, цвет}; 'reg'/'regip' — только реестр без живой пробы
+  const KIND_META = {
+    ok:      { t: 'OK',      c: '#3fb950' },
+    dpi:     { t: 'DPI',     c: '#f85149' },
+    ip:      { t: 'IP',      c: '#f85149' },
+    partial: { t: '16-20КБ', c: '#d29922' },
+    tear:    { t: 'обрыв',   c: '#d29922' },
+    slow:    { t: 'медленно', c: '#d29922' },
+    reg:     { t: 'в реестре', c: '#a371f7' },
+    regip:   { t: 'IP-реестр', c: '#a371f7' },
+  };
   const classify = (p1, p2, regDom, regIp, ips) => {
     const parts = [];
-    if (regDom) parts.push({ b: true, i: '📋', t: 'домен в реестре' });
+    if (regDom) parts.push({ k: 'reg', b: true, t: 'домен в реестре блокировок' });
     if (regIp) {
       const hit = (ips || []).filter(ipInReg).slice(0, 2).join(', ');
-      parts.push({ b: true, i: '📍', t: 'IP-подсеть в реестре' + (hit ? ' (' + hit + ')' : '') });
+      parts.push({ k: 'regip', b: true, t: 'IP-подсеть в реестре' + (hit ? ' (' + hit + ')' : '') });
     }
     const okP2 = p2 && (p2.kind === 'ok' || p2.kind === 'abort');
     const maxLoaded = Math.max(p1 ? p1.loaded : 0, p2 ? p2.loaded : 0);
@@ -773,29 +785,32 @@
     const rate = (p) => (p && p.sustained !== null ? ' · ~' + Math.round(p.sustained / 1024) + 'КБ/с' : '');
     if (p1 && (p1.kind === 'ok' || p1.kind === 'abort')) {
       if (p1.sustained !== null && p1.sustained < CFG.slowBytesPerSec && p1.loaded >= CFG.slowMinBytes) {
-        parts.push({ b: true, i: '🐢', t: 'замедление (~' + Math.round(p1.sustained / 1024) + 'КБ/с устойчиво)' });
+        parts.push({ k: 'slow', b: true, t: 'замедление (~' + Math.round(p1.sustained / 1024) + 'КБ/с устойчиво)' });
       }
-      parts.push({ b: false, i: '✅', t: (p1.kind === 'ok' ? 'доступен (HTTP ' + p1.status + ')' : 'доступен') + rate(p1) });
+      parts.push({ k: 'ok', b: false, t: (p1.kind === 'ok' ? 'доступен (HTTP ' + p1.status + ')' : 'доступен') + rate(p1) });
     } else if (okP2) {
-      parts.push({ b: true, i: '⛔', t: 'HTTPS не отвечает/сброшен, HTTP отвечает — похоже на DPI по SNI (или нет TLS)' + rate(p2) });
+      parts.push({ k: 'dpi', b: true, t: 'HTTPS не отвечает/сброшен, HTTP отвечает — похоже на DPI по SNI (или нет TLS)' + rate(p2) });
     } else if (p1 && p1.kind === 'timeout' && p1.loaded > 0) {
       // байты шли, но за таймаут не докачались: медленно или «встало» — НЕ «полная блокировка»
       if (p1.silentMs > CFG.stallSilentMs) {
-        parts.push({ b: true, i: '✂️', t: 'встало после ~' + kb(p1.loaded) + 'КБ — частичная блокировка/обрыв' });
+        parts.push({ k: 'partial', b: true, t: 'встало после ~' + kb(p1.loaded) + 'КБ — частичная блокировка/обрыв' });
       } else {
-        parts.push({ b: true, i: '🐢', t: 'очень медленно: ' + kb(p1.loaded) + 'КБ за ' + Math.round(p1.ms / 1000) + 'с' + rate(p1) });
+        parts.push({ k: 'slow', b: true, t: 'очень медленно: ' + kb(p1.loaded) + 'КБ за ' + Math.round(p1.ms / 1000) + 'с' + rate(p1) });
       }
     } else if (maxLoaded >= CFG.partialMin && maxLoaded <= CFG.partialMax && ((p1 && p1.kind === 'err') || (p2 && p2.kind === 'err'))) {
-      parts.push({ b: true, i: '✂️', t: 'обрыв после ~' + kb(maxLoaded) + 'КБ — частичная блокировка (16-20КБ)' });
+      parts.push({ k: 'partial', b: true, t: 'обрыв после ~' + kb(maxLoaded) + 'КБ — частичная блокировка (16-20КБ)' });
     } else if (maxLoaded > CFG.partialMax && ((p1 && p1.kind === 'err') || (p2 && p2.kind === 'err'))) {
-      parts.push({ b: true, i: '⚠️', t: 'обрыв после ' + kb(maxLoaded) + 'КБ' + rate(p1 || p2) });
+      parts.push({ k: 'tear', b: true, t: 'обрыв после ' + kb(maxLoaded) + 'КБ' + rate(p1 || p2) });
     } else if (p1 && p1.kind === 'timeout' && (!p2 || p2.kind === 'timeout')) {
-      parts.push({ b: true, i: '🕳', t: 'нет ответа (0 байт) — похоже на полную блокировку по IP' });
+      parts.push({ k: 'ip', b: true, t: 'нет ответа (0 байт) — похоже на полную блокировку по IP' });
     } else {
-      parts.push({ b: true, i: '⛔', t: 'сброс соединения — похоже на DPI' });
+      parts.push({ k: 'dpi', b: true, t: 'сброс соединения — похоже на DPI' });
     }
-    const icons = [...new Set(parts.map((p) => p.i))].join('');
-    return { blocked: parts.some((p) => p.b), icons, tag: parts.map((p) => p.t).join(' · ') };
+    // первичный сетевой вердикт приоритетнее «сервисных» пометок реестра
+    const NET_ORDER = ['dpi', 'ip', 'partial', 'tear', 'slow', 'ok'];
+    const net = parts.map((p) => p.k).find((k) => NET_ORDER.includes(k));
+    const primary = net || parts.map((p) => p.k).find((k) => k === 'reg' || k === 'regip') || 'reg';
+    return { blocked: parts.some((p) => p.b), primary, tag: parts.map((p) => p.t).join(' · ') };
   };
 
   const checkDomain = async (host) => {
@@ -857,7 +872,7 @@
   };
   const checkAll = async () => {
     if (running) { stopReq = true; return; }
-    if (!hasGM) { statusMsg = '⚠️ Проверка недоступна: нужен Tampermonkey/Violentmonkey (GM_xmlhttpRequest)'; renderSoon(); return; }
+    if (!hasGM) { statusMsg = 'Проверка недоступна: нужен Tampermonkey/Violentmonkey (GM_xmlhttpRequest)'; renderSoon(); return; }
     if (!REG.dom) {
       statusMsg = '⏳ Загружаю списки реестра (первый раз ~10-20 МБ, кэш 12 ч)…'; renderSoon();
       await loadLists(false);
@@ -886,53 +901,155 @@
     scanSheets();
     setTimeout(scanSheets, 2000); setTimeout(scanSheets, 8000); // CSS догружаются позже
 
-    const mkBtn = (label, bg, hint) => {
+    // ── Liquid Glass: тема (auto/dark/light), монохромные SVG-иконки вместо эмодзи ──
+    const THEME_KEY = '__dsnf3_theme';
+    let theme = (() => { try { return gmGet(THEME_KEY, 'auto'); } catch { return 'auto'; } })();
+    let blurOK = true;
+    try { blurOK = window.CSS && CSS.supports && (CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)')); } catch { blurOK = false; }
+    const isLight = () => theme === 'light' || (theme === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+
+    const ICONS = {
+      globe: 'M8 2.6a5.4 5.4 0 1 1 0 10.8 5.4 5.4 0 0 1 0-10.8Zm-5.4 5.4h10.8M8 2.6c2 1.6 2 9.2 0 10.8M8 2.6c-2 1.6-2 9.2 0 10.8',
+      copy: 'M10.5 3.5h-5a1 1 0 0 0-1 1v6m1 1h5.5a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1M2.5 5.5h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z',
+      refresh: 'M13.3 6.7A5.6 5.6 0 1 0 13.9 9M13.6 2.6v3.4h-3.4',
+      gear: 'M8 5.9A2.1 2.1 0 1 0 8 10.1 2.1 2.1 0 0 0 8 5.9ZM8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4',
+      trash: 'M2.5 4.2h11M6.2 4.2V2.8h3.6v1.4M3.9 4.2l.5 8.4a1 1 0 0 0 1 .9h5.2a1 1 0 0 0 1-.9l.5-8.4M6.4 7v4m3.2-4v4',
+      minus: 'M3.5 8h9',
+      grip: 'M5.7 3.6v.01M5.7 6.5v.01M5.7 9.4v.01M5.7 12.3v.01M10.3 3.6v.01M10.3 6.5v.01M10.3 9.4v.01M10.3 12.3v.01',
+      theme: 'M8 2.75A5.25 5.25 0 1 1 8 13.25 5.25 5.25 0 0 1 8 2.75Z|M8 2.75a5.25 5.25 0 0 1 0 10.5Z',
+    };
+    const svgIcon = (name, size) => {
+      const NS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 16 16');
+      svg.setAttribute('width', size || 14); svg.setAttribute('height', size || 14);
+      svg.setAttribute('fill', 'none');
+      svg.setAttribute('stroke', 'currentColor');
+      svg.setAttribute('stroke-width', '1.4');
+      svg.setAttribute('stroke-linecap', 'round');
+      svg.style.display = 'block';
+      svg.style.flex = '0 0 auto';
+      for (const d of (ICONS[name] || '').split('|')) {
+        const p = document.createElementNS(NS, 'path');
+        p.setAttribute('d', d);
+        if (name === 'theme' && d.indexOf('M8 2.75a5.25') === 0) { p.setAttribute('fill', 'currentColor'); p.setAttribute('stroke', 'none'); }
+        svg.append(p);
+      }
+      return svg;
+    };
+
+    const mkBtn = (label, hint, icon) => {
       const b = document.createElement('button');
-      b.textContent = label;
+      if (icon) b.append(svgIcon(icon, 14));
+      if (label) {
+        const sp = document.createElement('span');
+        sp.textContent = label;
+        if (icon) sp.style.marginLeft = '6px';
+        b.append(sp);
+      }
       if (hint) b.title = hint;
-      Object.assign(b.style, { background: bg || '#21262d', color: '#e6edf3', border: '1px solid #30363d', borderRadius: '6px', padding: '3px 7px', cursor: 'pointer', font: 'inherit', fontSize: '11px', whiteSpace: 'nowrap' });
+      Object.assign(b.style, { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'var(--btn)', color: 'var(--txt)', border: '1px solid var(--border-soft)', borderRadius: '8px', padding: icon && !label ? '5px' : '4px 10px', cursor: 'pointer', font: 'inherit', fontSize: '11px', whiteSpace: 'nowrap', transition: 'background .12s ease' });
+      b.onmouseenter = () => { b.style.background = 'var(--btn-hover)'; };
+      b.onmouseleave = () => { b.style.background = 'var(--btn)'; };
       return b;
     };
 
     const pill = document.createElement('button');
     pill.id = '__dsnf3_pill';
     pill.title = 'Domain Sniffer: показать собранные домены';
-    Object.assign(pill.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 2147483647, background: '#14161a', color: '#58a6ff', border: '1px solid #30363d', borderRadius: '999px', padding: '6px 12px', font: '600 12px/1 ui-monospace,Consolas,monospace', cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,.45)' });
+    const pillDot = document.createElement('span');
+    Object.assign(pillDot.style, { width: '8px', height: '8px', borderRadius: '50%', background: '#3fb950', flex: '0 0 auto' });
+    const pillTxt = document.createElement('span');
+    pillTxt.textContent = '0';
+    Object.assign(pill.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 2147483647, display: 'none', alignItems: 'center', gap: '7px', background: blurOK ? 'var(--glass)' : 'var(--glass-solid)', backdropFilter: blurOK ? 'blur(20px) saturate(1.5)' : 'none', WebkitBackdropFilter: blurOK ? 'blur(20px) saturate(1.5)' : 'none', color: 'var(--txt)', border: '1px solid var(--border)', borderRadius: '14px', padding: '8px 13px', font: '600 12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', cursor: 'pointer', boxShadow: 'var(--shadow)' });
+    pill.append(pillDot, pillTxt);
 
     const box = document.createElement('div');
     box.id = '__dsnf3_box';
-    Object.assign(box.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 2147483647, width: '560px', maxWidth: 'calc(100vw - 20px)', background: '#14161a', color: '#e6edf3', border: '1px solid #30363d', borderRadius: '10px', font: '12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', boxShadow: '0 8px 28px rgba(0,0,0,.55)', padding: '10px' });
+    Object.assign(box.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 2147483647, width: '640px', maxWidth: 'calc(100vw - 20px)', display: 'none', background: blurOK ? 'var(--glass)' : 'var(--glass-solid)', backdropFilter: blurOK ? 'blur(24px) saturate(1.5)' : 'none', WebkitBackdropFilter: blurOK ? 'blur(24px) saturate(1.5)' : 'none', color: 'var(--txt)', border: '1px solid var(--border)', borderRadius: '16px', font: '12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', boxShadow: 'var(--shadow), inset 0 1px 0 var(--hl)', padding: '12px' });
+
+    const applyTheme = () => {
+      const L = isLight();
+      const V = L ? {
+        '--glass': 'rgba(255,255,255,.70)', '--glass-solid': 'rgba(250,250,251,.97)',
+        '--border': 'rgba(0,0,0,.16)', '--border-soft': 'rgba(0,0,0,.09)',
+        '--txt': '#1f2328', '--muted': '#59636e', '--accent': '#0969da',
+        '--btn': 'rgba(0,0,0,.05)', '--btn-hover': 'rgba(0,0,0,.10)',
+        '--list': 'rgba(0,0,0,.045)', '--row-hover': 'rgba(0,0,0,.06)',
+        '--chip': 'rgba(0,0,0,.07)', '--bad': '#cf222e', '--badbg': 'rgba(207,34,46,.07)',
+        '--hl': 'rgba(255,255,255,.65)', '--shadow': '0 16px 48px rgba(0,0,0,.22)',
+      } : {
+        '--glass': 'rgba(22,24,28,.82)', '--glass-solid': 'rgba(20,22,26,.96)',
+        '--border': 'rgba(255,255,255,.16)', '--border-soft': 'rgba(255,255,255,.09)',
+        '--txt': '#e6edf3', '--muted': '#9198a1', '--accent': '#4493f8',
+        '--btn': 'rgba(255,255,255,.07)', '--btn-hover': 'rgba(255,255,255,.13)',
+        '--list': 'rgba(0,0,0,.28)', '--row-hover': 'rgba(255,255,255,.06)',
+        '--chip': 'rgba(255,255,255,.08)', '--bad': '#ff7b72', '--badbg': 'rgba(248,81,73,.10)',
+        '--hl': 'rgba(255,255,255,.10)', '--shadow': '0 16px 48px rgba(0,0,0,.5)',
+      };
+      for (const el of [pill, box]) for (const [k, v] of Object.entries(V)) el.style.setProperty(k, v);
+      themeBtn.title = 'Тема: ' + (theme === 'auto' ? 'как у системы' : theme === 'dark' ? 'тёмная' : 'светлая') + ' (клик — переключить)';
+    };
 
     const header = document.createElement('div');
-    Object.assign(header.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', marginBottom: '8px', flexWrap: 'wrap' });
-    const title = document.createElement('strong');
-    Object.assign(title.style, { fontSize: '12px', color: '#58a6ff', whiteSpace: 'nowrap' });
+    Object.assign(header.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '10px', cursor: 'move', userSelect: 'none' });
+    const hLeft = document.createElement('div');
+    Object.assign(hLeft.style, { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 1 auto', overflow: 'hidden' });
+    const grip = svgIcon('grip', 14);
+    grip.style.color = 'var(--muted)';
+    const title = document.createElement('span');
+    title.textContent = 'Domain Sniffer';
+    Object.assign(title.style, { fontSize: '12px', fontWeight: '700', letterSpacing: '.02em', color: 'var(--txt)', whiteSpace: 'nowrap' });
+    hLeft.append(grip, title);
     const btnGroup = document.createElement('div');
     Object.assign(btnGroup.style, { display: 'flex', gap: '4px', flexWrap: 'wrap' });
+    header.append(hLeft, btnGroup);
 
-    const reloadBtn = mkBtn('🔄', '#1f6feb', 'Перезагрузить сайт и собрать все домены с нуля (список накапливается)');
-    const modeBtn = mkBtn('Поддомены', '#21262d', 'Показывать все поддомены или только корневые домены');
-    const copyBtn = mkBtn('Копировать', '#238636', 'Скопировать список доменов');
-    const checkBtn = mkBtn('🚫 Проверить', '#7c3aed', 'Проверить все собранные домены: реестр блокировок + IP-подсети + живые пробы у вашего провайдера (DPI / полная / ~16-20КБ / замедление)');
-    const chbBtn = mkBtn('🌍 Регионы', '#0d5c91', 'Проверить домен текущего сайта по регионам РФ (cheburcheck.ru): десятки сканеров покажут SNI-блок/ТСПУ/подмену DNS/CDN 16-20КБ по всем операторам (~1-2 мин, кэш 6 ч)');
-    const clearBtn = mkBtn('🧹', '#21262d', 'Очистить собранный список');
-    const helpBtn = mkBtn('?', '#21262d', 'Справка: что означают статусы и кнопки');
-    const minBtn = mkBtn('—', '#21262d', 'Свернуть');
-    const gearBtn = mkBtn('⚙', '#21262d', 'Маршрут через прокси: подключение к Clash API роутера/ПК (Podkop/Forkop/NetShift/sing-box/clash)');
+    // перетаскивание панели за шапку + запоминание позиции
+    header.onmousedown = (e) => {
+      if (e.button !== 0 || (e.target.closest && e.target.closest('button'))) return;
+      e.preventDefault();
+      const r = box.getBoundingClientRect();
+      let sx = e.clientX - r.left, sy = e.clientY - r.top;
+      box.style.left = r.left + 'px'; box.style.top = r.top + 'px';
+      box.style.right = 'auto'; box.style.bottom = 'auto';
+      const move = (ev) => {
+        const x = Math.max(10 - r.width, Math.min(ev.clientX - sx, window.innerWidth - 10));
+        const y = Math.max(0, Math.min(ev.clientY - sy, window.innerHeight - 44));
+        box.style.left = x + 'px'; box.style.top = y + 'px';
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        try { const rr = box.getBoundingClientRect(); gmSet('__dsnf3_pos', { x: Math.round(rr.left), y: Math.round(rr.top) }); } catch {}
+      };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    };
+
+    const reloadBtn = mkBtn('', 'Перезагрузить сайт и собрать домены заново (список накапливается)', 'refresh');
+    const modeBtn = mkBtn('Поддомены', 'Показывать все поддомены или только корневые домены');
+    const copyBtn = mkBtn('Список', 'Скопировать весь список доменов');
+    const checkBtn = mkBtn('Проверить', 'Проверить все собранные домены: реестр блокировок + IP-подсети + живые пробы у вашего провайдера (DPI / полная / ~16-20КБ / замедление)');
+    const chbBtn = mkBtn('Регионы', 'Проверить домен текущего сайта по регионам РФ (cheburcheck.ru): десятки сканеров покажут SNI-блок/ТСПУ/подмену DNS/CDN 16-20КБ по всем операторам (~1-2 мин, кэш 6 ч)');
+    const clearBtn = mkBtn('', 'Очистить собранный список', 'trash');
+    const helpBtn = mkBtn('?', 'Справка: что означают статусы и кнопки');
+    const themeBtn = mkBtn('', 'Тема (клик — переключить: система / тёмная / светлая)', 'theme');
+    const minBtn = mkBtn('—', 'Свернуть');
+    const gearBtn = mkBtn('', 'Маршрут через прокси: подключение к Clash API роутера/ПК (Podkop/Forkop/NetShift/sing-box/clash)', 'gear');
+    applyTheme();
 
     // настройки подключения к Clash API
     const settings = document.createElement('div');
-    Object.assign(settings.style, { display: 'none', marginTop: '8px', borderTop: '1px solid #21262d', paddingTop: '8px' });
+    Object.assign(settings.style, { display: 'none', marginTop: '10px', borderTop: '1px solid var(--border-soft)', paddingTop: '10px' });
     const urlIn = document.createElement('input');
     urlIn.placeholder = 'Clash API, напр. http://192.168.1.1:9090';
-    Object.assign(urlIn.style, { display: 'block', width: '100%', boxSizing: 'border-box', background: '#0d1117', border: '1px solid #30363d', borderRadius: '6px', color: '#e6edf3', font: 'inherit', fontSize: '11px', padding: '4px 6px', marginBottom: '4px' });
+    Object.assign(urlIn.style, { display: 'block', width: '100%', boxSizing: 'border-box', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '8px', color: 'var(--txt)', font: 'inherit', fontSize: '11px', padding: '5px 8px', marginBottom: '6px' });
     const secIn = document.createElement('input');
     secIn.placeholder = 'секрет (если задан на роутере)';
     secIn.type = 'password';
-    Object.assign(secIn.style, { display: 'block', width: '100%', boxSizing: 'border-box', background: '#0d1117', border: '1px solid #30363d', borderRadius: '6px', color: '#e6edf3', font: 'inherit', fontSize: '11px', padding: '4px 6px', marginBottom: '4px' });
-    const applyBtn = mkBtn('Подключить', '#1f6feb', 'Проверить адрес и подключиться');
+    Object.assign(secIn.style, { display: 'block', width: '100%', boxSizing: 'border-box', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '8px', color: 'var(--txt)', font: 'inherit', fontSize: '11px', padding: '5px 8px', marginBottom: '6px' });
+    const applyBtn = mkBtn('Подключить', 'Проверить адрес и подключиться');
     const setStat = document.createElement('span');
-    Object.assign(setStat.style, { fontSize: '10px', color: '#8b949e', marginLeft: '6px' });
+    Object.assign(setStat.style, { fontSize: '10px', color: 'var(--muted)', marginLeft: '6px' });
     applyBtn.onclick = async () => { setStat.textContent = '…проверяю'; setStat.textContent = await connectRoute(urlIn.value, secIn.value, true); render(); };
     const srow = document.createElement('div');
     Object.assign(srow.style, { display: 'flex', alignItems: 'center', gap: '4px' });
@@ -945,14 +1062,14 @@
     };
 
     const list = document.createElement('div');
-    Object.assign(list.style, { maxHeight: '340px', overflow: 'auto', background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '6px', userSelect: 'text' });
+    Object.assign(list.style, { maxHeight: '420px', overflow: 'auto', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '10px', padding: '6px', userSelect: 'text' });
 
     // фильтры-чипсы: сразу видно, сколько проблем и сколько доступно
     const filters = document.createElement('div');
-    Object.assign(filters.style, { display: 'flex', gap: '4px', marginBottom: '6px', flexWrap: 'wrap' });
+    Object.assign(filters.style, { display: 'flex', gap: '5px', marginBottom: '8px', flexWrap: 'wrap' });
     const mkChip = (key) => {
       const c = document.createElement('button');
-      Object.assign(c.style, { background: '#21262d', color: '#e6edf3', border: '1px solid #30363d', borderRadius: '999px', padding: '3px 10px', cursor: 'pointer', font: 'inherit', fontSize: '11px', whiteSpace: 'nowrap' });
+      Object.assign(c.style, { background: 'var(--chip)', color: 'var(--txt)', border: '1px solid transparent', borderRadius: '999px', padding: '4px 11px', cursor: 'pointer', font: 'inherit', fontSize: '11px', whiteSpace: 'nowrap', transition: 'background .12s ease' });
       c.onclick = () => { viewFilter = key; render(); };
       filters.append(c);
       return c;
@@ -963,41 +1080,43 @@
 
     // вся документация — внутри панели по кнопке «?»
     const help = document.createElement('div');
-    Object.assign(help.style, { display: 'none', background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '10px 12px', fontSize: '11px', lineHeight: '1.55', color: '#c9d1d9', overflow: 'auto', maxHeight: '340px', userSelect: 'text' });
-    const hSec = (txt) => { const e = document.createElement('div'); e.textContent = txt; Object.assign(e.style, { color: '#58a6ff', fontWeight: '600', margin: '10px 0 3px' }); return e; };
+    Object.assign(help.style, { display: 'none', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '10px', padding: '10px 12px', fontSize: '11px', lineHeight: '1.55', color: 'var(--txt)', overflow: 'auto', maxHeight: '420px', userSelect: 'text' });
+    const hSec = (txt) => { const e = document.createElement('div'); e.textContent = txt; Object.assign(e.style, { color: 'var(--accent)', fontWeight: '700', margin: '10px 0 3px', letterSpacing: '.02em' }); return e; };
     const hLine = (txt) => { const e = document.createElement('div'); e.textContent = txt; Object.assign(e.style, { marginBottom: '3px' }); return e; };
     help.append(
       hSec('Что это'),
       hLine('Скрипт собирает все домены, которые загружает сайт, и проверяет, какие из них заблокированы у вашего провайдера — чтобы было видно, почему сайт не работает или работает плохо.'),
       hSec('Кнопки'),
-      hLine('🚫 Проверить — проверить все собранные домены: реестр блокировок + живые пробы у вашего провайдера.'),
-      hLine('🌍 Регионы — домен текущего сайта проверяют десятки сканеров по России (cheburcheck.ru): видно, блокировка общая или только у вашего оператора. Долго (~1-2 мин), кэш 6 ч.'),
-      hLine('🔄 — перезагрузить сайт и собрать домены заново · 🧹 — очистить список · Копировать — список в буфер обмена.'),
-      hLine('⚙ — подключение к Clash API роутера (Podkop/Forkop/NetShift) или локального прокси: тогда видно, какой домен идёт через прокси, а какой напрямую.'),
+      hLine('«Проверить» — проверить все собранные домены: реестр блокировок + живые пробы у вашего провайдера.'),
+      hLine('«Регионы» — домен текущего сайта проверяют десятки сканеров по России (cheburcheck.ru): видно, блокировка общая или только у вашего оператора. Долго (~1-2 мин), кэш 6 ч.'),
+      hLine('Иконки в шапке: обновить (перезагрузить сайт и собрать заново) · шестерёнка (подключение к Clash API роутера Podkop/Forkop/NetShift) · тема · корзина (очистить) · «—» (свернуть).'),
+      hLine('«Список» — скопировать весь список доменов в буфер обмена.'),
       hSec('Статусы (проверка у вашего провайдера)'),
-      hLine('✅ доступен'),
-      hLine('⛔ сброс соединения — похоже на DPI-блокировку по имени домена'),
-      hLine('🕳 нет ответа — похоже на полную блокировку по IP'),
-      hLine('✂️ обрыв после ~16-20КБ — «частичная» блокировка страницы'),
-      hLine('🐢 очень медленно — похоже на замедление (троттлинг)'),
-      hLine('📋 домен есть в реестре блокировок · 📍 его IP в заблокированных подсетях (хостинг типа Hetzner/Cloudflare)'),
-      hSec('Маршрут (нужен ⚙ Clash API)'),
-      hLine('🚀 домен идёт через прокси (показана цепочка) · ⬇ идёт напрямую (и по какому правилу)'),
-      hLine('🚀? / ⬇? — определено косвенно, без Clash API (по реестру и задержкам)'),
-      hLine('🔴 — заблокирован И идёт напрямую: добавьте этот домен в прокси-лист роутера, и сайт заработает.'),
+      hLine('● OK — доступен (зелёная точка)'),
+      hLine('● DPI — сброс соединения, похоже на блокировку по имени домена (SNI)'),
+      hLine('● IP — нет ответа, похоже на полную блокировку по IP'),
+      hLine('● 16-20КБ — обрыв после ~16-20КБ, «частичная» блокировка страницы'),
+      hLine('● обрыв — соединение оборвалось после большого объёма'),
+      hLine('● медленно — похоже на замедление (троттлинг)'),
+      hLine('В подробностях под строкой: «домен в реестре блокировок», «IP-подсеть в реестре» (хостинг типа Hetzner/Cloudflare).'),
+      hSec('Маршрут (нужен Clash API — шестерёнка)'),
+      hLine('«через прокси» — домен идёт через VPN/прокси (показана цепочка) · «напрямую» — идёт в обход (и по какому правилу)'),
+      hLine('со знаком «?» — определено косвенно, без Clash API (по реестру и задержкам)'),
+      hLine('Красная строка «заблокирован и НЕ в прокси» — добавьте домен в прокси-лист роутера, и сайт заработает.'),
       hSec('Мелочи'),
-      hLine('🌍 на строке — регион-чек этого домена по РФ'),
-      hLine('клик по имени домена или 📋 — скопировать этот домен'),
+      hLine('Иконка глобуса на строке — регион-чек этого домена по РФ'),
+      hLine('клик по имени домена или иконке копирования — скопировать этот домен'),
       hLine('клик по остальной строке — перепроверить один домен · число справа — задержка в мс'),
+      hLine('Шапку можно тащить мышью — позиция запоминается.'),
       hLine('Список доменов и статусы сохраняются при переходах по сайту (до закрытия вкладки).'),
     );
 
     const statusbar = document.createElement('div');
-    Object.assign(statusbar.style, { marginTop: '6px', fontSize: '10px', lineHeight: '1.5', color: '#8b949e' });
+    Object.assign(statusbar.style, { marginTop: '8px', fontSize: '10px', lineHeight: '1.5', color: 'var(--muted)' });
 
     const routebar = document.createElement('div');
-    Object.assign(routebar.style, { marginTop: '2px', fontSize: '10px', lineHeight: '1.5', color: '#79c0ff' });
-    routebar.title = 'Маршрутизация: кто идёт через прокси (🚀), кто напрямую (⬇). Без Clash API — только внешний IP/сплит';
+    Object.assign(routebar.style, { marginTop: '2px', fontSize: '10px', lineHeight: '1.5', color: 'var(--accent)' });
+    routebar.title = 'Маршрутизация: кто идёт через прокси, кто напрямую. Без Clash API — только внешний IP/сплит';
 
     // копирование в буфер (Clipboard API + запасной textarea); feedback — в статус-строке
     const copyText = async (text) => {
@@ -1013,56 +1132,65 @@
     };
     const flashStatus = (msg) => { statusMsg = msg; renderSoon(); setTimeout(() => { if (statusMsg === msg) { statusMsg = ''; renderSoon(); } }, 2000); };
 
-    const CHIP_STYLE = {
-      ok:   { bg: 'rgba(63,185,80,.15)',  fg: '#3fb950' },
-      bad:  { bg: 'rgba(248,81,73,.18)',  fg: '#f85149' },
-      none: { bg: 'rgba(139,148,158,.12)', fg: '#8b949e' },
-      busy: { bg: 'rgba(88,166,255,.15)', fg: '#58a6ff' },
+    // бейдж статуса: цветная точка + короткая подпись (без эмодзи)
+    const mkBadge = (badge, busy) => {
+      const wrap = document.createElement('span');
+      Object.assign(wrap.style, { display: 'inline-flex', alignItems: 'center', gap: '5px', flex: '0 0 auto', padding: '3px 8px', borderRadius: '7px', background: 'var(--chip)', whiteSpace: 'nowrap' });
+      const dot = document.createElement('span');
+      const b = badge || {};
+      dot.style.width = '7px'; dot.style.height = '7px'; dot.style.borderRadius = '50%';
+      dot.style.background = busy ? '#58a6ff' : (b.c || '#8b949e');
+      if (busy) dot.style.animation = '__dsnf3_pulse 1.2s ease-in-out infinite';
+      const label = document.createElement('span');
+      label.textContent = busy ? 'проверка' : (b.t || '—');
+      label.style.color = busy ? '#58a6ff' : (b.c || 'var(--muted)');
+      label.style.fontSize = '10px';
+      label.style.fontWeight = '600';
+      wrap.append(dot, label);
+      return wrap;
     };
+
     const mkRow = (r) => {
       const mood = r.busy ? 'busy' : (r.st || 'none');
-      const cs = CHIP_STYLE[mood] || CHIP_STYLE.none;
       const row = document.createElement('div');
-      Object.assign(row.style, { display: 'flex', flexDirection: 'column', gap: '1px', padding: '4px 6px', borderRadius: '6px', cursor: r.click ? 'pointer' : 'default', marginBottom: '2px' });
-      if (mood === 'bad') row.style.background = 'rgba(248,81,73,.07)';
+      Object.assign(row.style, { display: 'flex', flexDirection: 'column', gap: '1px', padding: '5px 7px', borderRadius: '9px', cursor: r.click ? 'pointer' : 'default', marginBottom: '3px', transition: 'background .1s ease' });
+      if (mood === 'bad') row.style.background = 'var(--badbg)';
       if (r.danger) row.style.borderLeft = '2px solid #f85149';
-      row.onmouseenter = () => { row.style.background = mood === 'bad' ? 'rgba(248,81,73,.14)' : '#161b22'; };
-      row.onmouseleave = () => { row.style.background = mood === 'bad' ? 'rgba(248,81,73,.07)' : 'transparent'; };
+      row.onmouseenter = () => { row.style.background = mood === 'bad' ? 'var(--badbg)' : 'var(--row-hover)'; if (mood === 'bad') row.style.filter = 'brightness(1.25)'; };
+      row.onmouseleave = () => { row.style.background = mood === 'bad' ? 'var(--badbg)' : 'transparent'; row.style.filter = ''; };
 
       const l1 = document.createElement('div');
-      Object.assign(l1.style, { display: 'flex', alignItems: 'center', gap: '8px' });
-      const chip = document.createElement('span');
-      chip.textContent = r.busy ? '⏳' : (r.icons || '·');
-      Object.assign(chip.style, { flex: '0 0 auto', background: cs.bg, color: cs.fg, borderRadius: '5px', padding: '2px 5px', fontSize: '11px', whiteSpace: 'nowrap' });
+      Object.assign(l1.style, { display: 'flex', alignItems: 'center', gap: '9px' });
+      l1.append(mkBadge(r.badge, r.busy));
       const host = document.createElement('span');
       host.textContent = r.host;
-      Object.assign(host.style, { flex: '1 1 auto', minWidth: '0', overflowWrap: 'anywhere', color: mood === 'bad' ? '#ffb0ac' : '#e6edf3' });
+      Object.assign(host.style, { flex: '1 1 auto', minWidth: '0', overflowWrap: 'anywhere', color: mood === 'bad' ? 'var(--bad)' : 'var(--txt)' });
       host.style.cursor = 'pointer';
       host.title = 'Нажмите, чтобы скопировать домен';
       host.onclick = (ev) => {
         ev.stopPropagation(); // не запускаем перепроверку строки
-        copyText(r.host).then((okk) => flashStatus(okk ? '📋 Скопировано: ' + r.host : '⚠️ Не удалось скопировать'));
+        copyText(r.host).then((okk) => flashStatus(okk ? 'Скопировано: ' + r.host : 'Не удалось скопировать'));
       };
-      l1.append(chip, host);
-      if (r.ms) { const ms = document.createElement('span'); ms.textContent = r.ms + 'мс'; Object.assign(ms.style, { flex: '0 0 auto', color: '#8b949e', fontSize: '10px' }); l1.append(ms); }
+      l1.append(host);
+      if (r.ms) { const ms = document.createElement('span'); ms.textContent = r.ms + ' мс'; Object.assign(ms.style, { flex: '0 0 auto', color: 'var(--muted)', fontSize: '10px' }); l1.append(ms); }
       const cb = document.createElement('span');
-      cb.textContent = '📋';
       cb.title = 'Скопировать этот домен';
-      Object.assign(cb.style, { flex: '0 0 auto', cursor: 'pointer', opacity: '.8', fontSize: '11px' });
+      Object.assign(cb.style, { flex: '0 0 auto', cursor: 'pointer', opacity: '.55', color: 'var(--muted)', display: 'flex' });
+      cb.append(svgIcon('copy', 13));
       cb.onmouseenter = () => { cb.style.opacity = '1'; };
-      cb.onmouseleave = () => { cb.style.opacity = '.8'; };
+      cb.onmouseleave = () => { cb.style.opacity = '.55'; };
       cb.onclick = (ev) => {
         ev.stopPropagation();
-        copyText(r.host).then((okk) => flashStatus(okk ? '📋 Скопировано: ' + r.host : '⚠️ Не удалось скопировать'));
+        copyText(r.host).then((okk) => flashStatus(okk ? 'Скопировано: ' + r.host : 'Не удалось скопировать'));
       };
       l1.append(cb);
       if (hasGM && r.host && r.host.includes('.')) {
         const rb = document.createElement('span');
-        rb.textContent = '🌍';
         rb.title = 'Регион-чек: блокировки по РФ через cheburcheck.ru (~1-2 мин, кэш 6 ч)';
-        Object.assign(rb.style, { flex: '0 0 auto', cursor: 'pointer', opacity: '.8', fontSize: '12px' });
+        Object.assign(rb.style, { flex: '0 0 auto', cursor: 'pointer', opacity: '.55', color: 'var(--muted)', display: 'flex' });
+        rb.append(svgIcon('globe', 13));
         rb.onmouseenter = () => { rb.style.opacity = '1'; };
-        rb.onmouseleave = () => { rb.style.opacity = '.8'; };
+        rb.onmouseleave = () => { rb.style.opacity = '.55'; };
         rb.onclick = (ev) => { ev.stopPropagation(); if (!chbQueue.includes(r.host)) chbQueue.push(r.host); chbPump(); };
         l1.append(rb);
       }
@@ -1072,7 +1200,7 @@
       if (extra) {
         const l2 = document.createElement('div');
         l2.textContent = extra;
-        Object.assign(l2.style, { fontSize: '10px', lineHeight: '1.45', color: '#8b949e', paddingLeft: '38px', overflowWrap: 'anywhere' });
+        Object.assign(l2.style, { fontSize: '10px', lineHeight: '1.45', color: 'var(--muted)', paddingLeft: '9px', overflowWrap: 'anywhere' });
         row.append(l2);
         row.title = extra;
       }
@@ -1087,15 +1215,19 @@
           const s = info.get(h) || {};
           const parts = [];
           let danger = !!(s.status && s.status.blocked && s.route && s.route.direct);
-          if (danger) parts.push('🔴 заблокирован и НЕ в прокси — добавьте в список');
-          if (s.route) parts.push(s.route.direct ? '⬇' + (s.route.inferred ? '?' : '') + ' напрямую' + (s.route.rule ? ' [' + s.route.rule + ']' : '') : '🚀' + (s.route.inferred ? '?' : '') + ' ' + s.route.via);
+          if (danger) parts.push('заблокирован и НЕ в прокси — добавьте в прокси-лист роутера');
+          if (s.route) parts.push(s.route.direct ? 'напрямую' + (s.route.inferred ? '?' : '') + (s.route.rule ? ' [' + s.route.rule + ']' : '') : 'через прокси' + (s.route.inferred ? '?' : '') + ': ' + s.route.via);
           const ct = chbTag(s);
           if (ct) parts.push(ct);
           if (s.status) parts.push(s.status.tag);
           const blocked = !!(s.status && s.status.blocked);
+          let badge = null;
+          if (danger) badge = { t: 'не в прокси', c: '#f85149' };
+          else if (s.status && s.status.primary && KIND_META[s.status.primary]) badge = { t: KIND_META[s.status.primary].t, c: KIND_META[s.status.primary].c };
+          else if (s.status && s.status.blocked) badge = { t: 'в реестре', c: '#a371f7' };
           out.push({
             host: h,
-            icons: (danger ? '🔴' : '') + (s.status ? s.status.icons : '') + (s.route ? ((s.route.direct ? '⬇' : '🚀') + (s.route.inferred ? '?' : '')) : '') + (s.reg && s.reg.total && s.reg.winner && CHB_V[s.reg.winner] ? CHB_V[s.reg.winner].i : ''),
+            badge,
             tag: parts.join(' · '),
             blocked,
             danger,
@@ -1110,22 +1242,28 @@
         for (const h of domains.keys()) {
           const r = getRoot(h);
           let e = map.get(r);
-          if (!e) { e = { host: r, subs: 0, blocked: 0, checked: 0, icons: '', prox: 0, direct: 0 }; map.set(r, e); }
+          if (!e) { e = { host: r, subs: 0, blocked: 0, checked: 0, prox: 0, direct: 0 }; map.set(r, e); }
           e.subs++;
           const s = info.get(h);
-          if (s && s.status) { e.checked++; if (s.status.blocked) e.blocked++; if (s.status.icons) e.icons += s.status.icons; }
-          if (s && s.route) {
-            if (s.route.direct) e.direct++; else e.prox++;
-            const mark = (s.route.direct ? '⬇' : '🚀') + (s.route.inferred ? '?' : '');
-            if (!e.icons.includes(mark)) e.icons += mark;
-          }
+          if (s && s.status) { e.checked++; if (s.status.blocked) e.blocked++; }
+          if (s && s.route) { if (s.route.direct) e.direct++; else e.prox++; }
         }
         for (const e of map.values()) {
           const parts = [];
-          if (e.prox || e.direct) parts.push((e.prox ? e.prox + '🚀' : '') + (e.direct ? ' ' + e.direct + '⬇' : '') + ' из ' + e.subs);
-          if (e.blocked) parts.push(e.blocked + '/' + e.subs + ' заблок.');
-          else if (e.checked) parts.push('ок');
-          out.push({ host: e.host, icons: e.icons, tag: parts.join(' · '), blocked: e.blocked > 0, danger: e.blocked > 0 && e.direct > 0 && e.prox === 0, st: e.blocked > 0 ? 'bad' : (e.checked && !e.blocked ? 'ok' : 'none'), ms: null, busy: false, click: null });
+          if (e.prox || e.direct) parts.push('маршрут: ' + (e.prox ? 'через прокси ' + e.prox : '') + (e.prox && e.direct ? ' · ' : '') + (e.direct ? 'напрямую ' + e.direct : '') + ' из ' + e.subs);
+          if (e.blocked) parts.push(e.blocked + '/' + e.subs + ' заблокированы');
+          else if (e.checked) parts.push('проблем не найдено');
+          out.push({
+            host: e.host,
+            badge: e.blocked > 0 ? { t: e.blocked + '/' + e.subs, c: '#f85149' } : (e.checked ? { t: 'OK', c: '#3fb950' } : null),
+            tag: parts.join(' · '),
+            blocked: e.blocked > 0,
+            danger: e.blocked > 0 && e.direct > 0 && e.prox === 0,
+            st: e.blocked > 0 ? 'bad' : (e.checked && !e.blocked ? 'ok' : 'none'),
+            ms: null,
+            busy: false,
+            click: null,
+          });
         }
       }
       // проблемные — всегда сверху
@@ -1135,13 +1273,13 @@
 
     const defaultStatus = () => {
       if (statusMsg) return statusMsg;
-      if (CHB.busy) return '🌍 Регион-чек ' + CHB.active + ': ответов ' + CHB.parts + (CHB.online ? ' / ' + CHB.online + ' сканеров' : '') + (chbQueue.length ? ' · в очереди ' + chbQueue.length : '');
-      if (running) return '⏳ Проверяю: осталось ' + queue.length + '…';
-      if (REG.loading) return '⏳ Загружаю списки реестра…';
-      if (REG.t) return '📋 Реестр: ' + REG.domCount.toLocaleString('ru-RU') + ' дом., ' + REG.netCount.toLocaleString('ru-RU') + ' подсетей · от ' + new Date(REG.t).toLocaleString('ru-RU');
-      if (REG.err) return '⚠️ ' + REG.err + ' — проверка только живыми пробами';
-      if (!hasGM) return '⚠️ GM_xmlhttpRequest недоступен — чек блокировок не работает';
-      return 'Домены: ' + domains.size + ' · «🚫 Проверить» — проверить блокировки';
+      if (CHB.busy) return 'Регион-чек ' + CHB.active + ': ответов ' + CHB.parts + (CHB.online ? ' / ' + CHB.online + ' сканеров' : '') + (chbQueue.length ? ' · в очереди ' + chbQueue.length : '');
+      if (running) return 'Проверка: осталось ' + queue.length + '…';
+      if (REG.loading) return 'Загрузка списков реестра…';
+      if (REG.t) return 'Реестр: ' + REG.domCount.toLocaleString('ru-RU') + ' дом., ' + REG.netCount.toLocaleString('ru-RU') + ' подсетей · от ' + new Date(REG.t).toLocaleString('ru-RU');
+      if (REG.err) return REG.err + ' — проверка только живыми пробами';
+      if (!hasGM) return 'GM_xmlhttpRequest недоступен — проверка блокировок не работает';
+      return 'Домены: ' + domains.size + ' · «Проверить» — проверить блокировки';
     };
 
     let lastSig = '';
@@ -1150,21 +1288,22 @@
       const badN = all.filter((r) => r.st === 'bad').length;
       const okN = all.filter((r) => r.st === 'ok').length;
       const rows = viewFilter === 'all' ? all : all.filter((r) => r.st === viewFilter);
-      pill.textContent = '🌐 ' + all.length + (badN ? ' ⛔' + badN : '');
-      pill.style.color = badN ? '#f85149' : '#58a6ff';
-      title.textContent = (rootOnly ? 'Корневые: ' : 'Домены: ') + all.length;
-      checkBtn.textContent = running ? '⏹ Стоп (' + queue.length + ')' : '🚫 Проверить';
+      pillTxt.textContent = String(all.length) + (badN ? ' / ' + badN : '');
+      pillDot.style.background = badN ? '#f85149' : '#3fb950';
+      checkBtn.textContent = running ? 'Стоп (' + queue.length + ')' : 'Проверить';
       chipAll.textContent = 'Все · ' + all.length;
-      chipBad.textContent = '⛔ Проблемные · ' + badN;
-      chipOk.textContent = '✅ Доступные · ' + okN;
+      chipBad.textContent = 'Проблемные · ' + badN;
+      chipOk.textContent = 'Доступные · ' + okN;
       for (const [c, k] of [[chipAll, 'all'], [chipBad, 'bad'], [chipOk, 'ok']]) {
-        c.style.background = viewFilter === k ? '#1f6feb' : '#21262d';
-        c.style.borderColor = viewFilter === k ? '#388bfd' : '#30363d';
+        c.style.background = viewFilter === k ? 'var(--accent)' : 'var(--chip)';
+        c.style.color = viewFilter === k ? '#fff' : 'var(--txt)';
+        c.style.borderColor = 'transparent';
       }
       help.style.display = showHelp ? 'block' : 'none';
       list.style.display = showHelp ? 'none' : 'block';
-      helpBtn.style.background = showHelp ? '#1f6feb' : '#21262d';
-      const sig = JSON.stringify([rootOnly, statusMsg, running, queue.length, REG.t, REG.err, viewFilter, showHelp, all.length, badN, okN, rows.map((r) => [r.host, r.icons, r.tag, r.blocked, r.busy])]);
+      helpBtn.style.background = showHelp ? 'var(--accent)' : 'var(--btn)';
+      helpBtn.style.color = showHelp ? '#fff' : 'var(--txt)';
+      const sig = JSON.stringify([rootOnly, statusMsg, running, queue.length, REG.t, REG.err, viewFilter, showHelp, all.length, badN, okN, rows.map((r) => [r.host, r.badge && r.badge.t, r.tag, r.blocked, r.busy])]);
       if (sig !== lastSig) {
         lastSig = sig;
         list.textContent = '';
@@ -1172,9 +1311,9 @@
         if (!rows.length) {
           const d = document.createElement('div');
           d.textContent = all.length
-            ? (viewFilter === 'bad' ? 'Проблемных доменов не найдено 🎉' : 'В этой категории пусто')
-            : 'Пока пусто: домены появятся, когда сайт начнёт что-то загружать. Нажмите «🚫 Проверить», чтобы проверить найденные.';
-          Object.assign(d.style, { color: '#8b949e', padding: '6px 2px' });
+            ? (viewFilter === 'bad' ? 'Проблемных доменов не найдено' : 'В этой категории пусто')
+            : 'Пока пусто: домены появятся, когда сайт начнёт что-то загружать. Нажмите «Проверить», чтобы проверить найденные.';
+          Object.assign(d.style, { color: 'var(--muted)', padding: '8px 4px' });
           frag.append(d);
         } else {
           rows.forEach((r) => frag.append(mkRow(r)));
@@ -1182,38 +1321,53 @@
         list.append(frag);
       }
       const rt = ROUTE.ok
-        ? '🛣 ' + ROUTE.base.replace(/^https?:\/\//, '') + (ROUTE.lastPoll ? ' · опрос ' + new Date(ROUTE.lastPoll).toLocaleTimeString('ru-RU') : '')
-        : (hasGM ? '🛣 Clash API не найден — авто-поиск ПК/роутер, задайте вручную (⚙)' : '');
-      const rtxt = [rt, echoText()].filter(Boolean).join('  |  ');
+        ? 'Маршрут: ' + ROUTE.base.replace(/^https?:\/\//, '') + (ROUTE.lastPoll ? ' · опрос ' + new Date(ROUTE.lastPoll).toLocaleTimeString('ru-RU') : '')
+        : (hasGM ? 'Маршрут: Clash API не найден — включите дашборд на роутере (Podkop/Forkop/NetShift) и задайте адрес в настройках' : '');
+      const rtxt = [rt, echoText()].filter(Boolean).join('   ·   ');
       if (routebar.textContent !== rtxt) routebar.textContent = rtxt;
       const st = defaultStatus();
       if (statusbar.textContent !== st) statusbar.textContent = st;
     };
     renderFn = render;
 
-    const syncVisibility = () => { pill.style.display = isOpen ? 'none' : 'block'; box.style.display = isOpen ? 'block' : 'none'; };
+    const syncVisibility = () => { pill.style.display = isOpen ? 'none' : 'flex'; box.style.display = isOpen ? 'block' : 'none'; };
     pill.onclick = () => { isOpen = true; setOpen(true); syncVisibility(); if (ROUTE.ok) startRoutePolling(); render(); };
     helpBtn.onclick = () => { showHelp = !showHelp; render(); };
+    themeBtn.onclick = () => { theme = theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto'; try { gmSet(THEME_KEY, theme); } catch {} applyTheme(); };
     minBtn.onclick = () => { isOpen = false; setOpen(false); stopRoutePolling(); syncVisibility(); };
     reloadBtn.onclick = () => { saveNow(); isOpen = true; setOpen(true); location.reload(); };
     modeBtn.onclick = () => { rootOnly = !rootOnly; modeBtn.textContent = rootOnly ? 'Корневые' : 'Поддомены'; render(); };
     clearBtn.onclick = () => { domains.clear(); info.clear(); queue.length = 0; try { sessionStorage.removeItem(SKEY); } catch {} render(); };
     copyBtn.onclick = async () => {
-      if (await copyText(getListText())) { copyBtn.textContent = 'Готово ✓'; setTimeout(() => { copyBtn.textContent = 'Копировать'; }, 1200); }
-      else flashStatus('⚠️ Не удалось скопировать список');
+      if (await copyText(getListText())) { copyBtn.textContent = 'Готово ✓'; setTimeout(() => { copyBtn.textContent = 'Список'; }, 1200); }
+      else flashStatus('Не удалось скопировать список');
     };
     checkBtn.onclick = () => { checkAll(); };
     chbBtn.onclick = () => {
       const h = String(location.hostname || '');
-      if (!h.includes('.')) { statusMsg = '🌍 Регион-чек доступен только для доменов'; renderSoon(); setTimeout(() => { statusMsg = ''; renderSoon(); }, 6000); return; }
+      if (!h.includes('.')) { statusMsg = 'Регион-чек доступен только для доменов'; renderSoon(); setTimeout(() => { statusMsg = ''; renderSoon(); }, 6000); return; }
       if (!chbQueue.includes(h)) chbQueue.push(h);
       chbPump();
     };
 
-    btnGroup.append(reloadBtn, modeBtn, copyBtn, checkBtn, chbBtn, gearBtn, helpBtn, clearBtn, minBtn);
-    header.append(title, btnGroup);
+    btnGroup.append(reloadBtn, modeBtn, copyBtn, checkBtn, chbBtn, gearBtn, helpBtn, themeBtn, clearBtn, minBtn);
     box.append(header, filters, list, help, statusbar, routebar, settings);
     document.documentElement.append(pill, box);
+    // анимация пульсации точки «проверка» + восстановление сохранённой позиции панели
+    if (!document.getElementById('__dsnf3_style')) {
+      const st = document.createElement('style');
+      st.id = '__dsnf3_style';
+      st.textContent = '@keyframes __dsnf3_pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }';
+      document.head.append(st);
+    }
+    try {
+      const p = gmGet('__dsnf3_pos', null);
+      if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+        box.style.left = Math.max(0, Math.min(p.x, window.innerWidth - 100)) + 'px';
+        box.style.top = Math.max(0, Math.min(p.y, window.innerHeight - 60)) + 'px';
+        box.style.right = 'auto'; box.style.bottom = 'auto';
+      }
+    } catch {}
     syncVisibility();
     render();
     if (hasGM) { detectRoute(); echoCheck(); } // найти Clash API (ПК/роутер) и выходной IP
