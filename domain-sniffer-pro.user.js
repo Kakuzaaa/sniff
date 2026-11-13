@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.1
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -156,6 +156,20 @@
   let linkOnly = (() => { try { return gmGet('__dsnf3_linkonly', true) !== false; } catch { return true; } })(); // по умолчанию «Только трафик»
   let statusMsg = '';
 
+  // пользовательский игнор-лист (маски с *) и режим сбора ссылок со страницы
+  const parseIgnore = (txt) => String(txt || '').split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#'));
+  const ignoreMatch = (host, arr) => {
+    for (const m of arr) {
+      if (m.indexOf('*') === -1) { if (host === m || host.endsWith('.' + m)) return true; }
+      else {
+        try { if (new RegExp('^' + m.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$').test(host)) return true; } catch {}
+      }
+    }
+    return false;
+  };
+  const IGNORE = { arr: parseIgnore((() => { try { return gmGet('__dsnf3_ignore', ''); } catch { return ''; } })()) };
+  let LINKMODE = (() => { try { const v = gmGet('__dsnf3_linkmode', 'all'); return v === 'internal' || v === 'off' ? v : 'all'; } catch { return 'all'; } })(); // all | internal | off
+
   // отложенный рендер (без UI во фреймах — просто no-op)
   let renderFn = null, renderTimer = 0;
   const renderSoon = () => { if (!renderFn || renderTimer || !isTop) return; renderTimer = setTimeout(() => { renderTimer = 0; try { renderFn(); } catch {} }, 200); };
@@ -186,6 +200,11 @@
     if (host.includes(':') || host.includes('[')) return false;      // IPv6
     if (!/^[a-z0-9._-]+$/.test(host)) return false;                  // посторонние символы
     if (!host.includes('.')) return false;                           // односоставные имена (интранет)
+    if (IGNORE.arr.length && ignoreMatch(host, IGNORE.arr)) return false; // пользовательский игнор-лист: не собирать вовсе
+    if (src === 'dom') {                                             // режим сбора ссылок со страницы
+      if (LINKMODE === 'off') return false;
+      if (LINKMODE === 'internal' && getRoot(host) !== getRoot(location.hostname)) return false;
+    }
     const rec = domains.get(host);
     if (rec) { rec[src] = true; return false; }                      // источник дополняем даже у знакомых
     domains.set(host, { net: src === 'net', dom: src === 'dom' });
@@ -893,6 +912,24 @@
     return list.sort((a, b) => getRoot(a).localeCompare(getRoot(b)) || a.localeCompare(b)).join('\n');
   };
 
+  // ────────────────── ОЧИСТКА ПО ИГНОРУ/РЕЖИМУ ССЫЛОК ──────────────────
+  const purgeIgnored = () => {
+    let removed = 0;
+    for (const h of [...domains.keys()]) {
+      if (ignoreMatch(h, IGNORE.arr)) { domains.delete(h); info.delete(h); removed++; }
+    }
+    renderSoon();
+    return removed;
+  };
+  const purgeLinkMode = () => {
+    if (LINKMODE === 'all') return;
+    for (const h of [...domains.keys()]) {
+      const rec = domains.get(h);
+      if (rec && !rec.net && (LINKMODE === 'off' || (LINKMODE === 'internal' && getRoot(h) !== getRoot(location.hostname)))) { domains.delete(h); info.delete(h); }
+    }
+    renderSoon();
+  };
+
   // ────────────────── UI (только в верхнем фрейме) ──────────────────
   const initUI = () => {
     if (document.getElementById('__dsnf3_box')) return;
@@ -1032,6 +1069,7 @@
     const reloadBtn = mkBtn('', 'Перезагрузить сайт и собрать домены заново (список накапливается)', 'refresh');
     const modeBtn = mkBtn('Поддомены', 'Показывать все поддомены или только корневые домены');
     const copyBtn = mkBtn('Список', 'Скопировать весь список доменов');
+    const probBtn = mkBtn('Проблемные', 'Скопировать только заблокированные и «не в прокси» домены — готовый список для прокси-листа роутера');
     const checkBtn = mkBtn('Проверить', 'Проверить все собранные домены: реестр блокировок + IP-подсети + живые пробы у вашего провайдера (DPI / полная / ~16-20КБ / замедление)');
     const chbBtn = mkBtn('Регионы', 'Проверить домен текущего сайта по регионам РФ (cheburcheck.ru): десятки сканеров покажут SNI-блок/ТСПУ/подмену DNS/CDN 16-20КБ по всем операторам (~1-2 мин, кэш 6 ч)');
     const clearBtn = mkBtn('', 'Очистить собранный список', 'trash');
@@ -1059,10 +1097,55 @@
     Object.assign(srow.style, { display: 'flex', alignItems: 'center', gap: '4px' });
     srow.append(applyBtn, setStat);
     settings.append(urlIn, secIn, srow);
+
+    // режим сбора ссылок со страницы
+    const lmLabel = document.createElement('div');
+    lmLabel.textContent = 'Сбор ссылок со страницы:';
+    Object.assign(lmLabel.style, { fontSize: '10px', color: 'var(--muted)', margin: '12px 0 4px' });
+    const lmSel = document.createElement('select');
+    [['all', 'Все ссылки (по умолчанию)'], ['internal', 'Только внутренние (свой корневой домен)'], ['off', 'Не собирать ссылки вообще']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; lmSel.append(o); });
+    lmSel.value = LINKMODE;
+    Object.assign(lmSel.style, { width: '100%', boxSizing: 'border-box', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '8px', color: 'var(--txt)', font: 'inherit', fontSize: '11px', padding: '5px 8px' });
+    const lmHint = document.createElement('div');
+    lmHint.textContent = 'Ссылки — домены, которые страница не загружала, а просто упоминала (выдача поиска, футеры, README). Уже собранные лишние убираются сразу.';
+    Object.assign(lmHint.style, { fontSize: '10px', color: 'var(--muted)', marginTop: '4px' });
+    lmSel.onchange = () => { LINKMODE = lmSel.value; try { gmSet('__dsnf3_linkmode', LINKMODE); } catch {} purgeLinkMode(); render(); };
+    settings.append(lmLabel, lmSel, lmHint);
+
+    // игнор-лист с масками
+    const igLabel = document.createElement('div');
+    igLabel.textContent = 'Игнор-лист — домены по маскам не собирать вовсе:';
+    Object.assign(igLabel.style, { fontSize: '10px', color: 'var(--muted)', margin: '12px 0 4px' });
+    const igTa = document.createElement('textarea');
+    igTa.rows = 3;
+    igTa.placeholder = '*.doubleclick.net\nads.*\n*betting*';
+    Object.assign(igTa.style, { display: 'block', width: '100%', boxSizing: 'border-box', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '8px', color: 'var(--txt)', font: 'inherit', fontSize: '11px', padding: '5px 8px', resize: 'vertical' });
+    const igSave = mkBtn('Сохранить', 'Применить маски и удалить совпавшие домены из списка');
+    const igStat = document.createElement('span');
+    Object.assign(igStat.style, { fontSize: '10px', color: 'var(--muted)', marginLeft: '6px' });
+    igSave.onclick = () => {
+      try { gmSet('__dsnf3_ignore', igTa.value); } catch {}
+      IGNORE.arr = parseIgnore(igTa.value);
+      const removed = purgeIgnored();
+      igStat.textContent = 'Масок: ' + IGNORE.arr.length + (removed ? ' · удалено из списка: ' + removed : '');
+      render();
+      setTimeout(() => { igStat.textContent = ''; }, 4000);
+    };
+    const igRow = document.createElement('div');
+    Object.assign(igRow.style, { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' });
+    igRow.append(igSave, igStat);
+    settings.append(igLabel, igTa, igRow);
+
     gearBtn.onclick = () => {
       const show = settings.style.display === 'none';
       settings.style.display = show ? 'block' : 'none';
-      if (show) { const saved = gmGet('__dsnf3_route', null); urlIn.value = (saved && saved.url) || (ROUTE.base || ''); secIn.value = (saved && saved.secret) || ''; }
+      if (show) {
+        const saved = gmGet('__dsnf3_route', null);
+        urlIn.value = (saved && saved.url) || (ROUTE.base || '');
+        secIn.value = (saved && saved.secret) || '';
+        try { igTa.value = String(gmGet('__dsnf3_ignore', '') || ''); } catch {}
+        lmSel.value = LINKMODE;
+      }
     };
 
     const list = document.createElement('div');
@@ -1099,7 +1182,8 @@
       hLine('«Проверить» — проверить все собранные домены: реестр блокировок + живые пробы у вашего провайдера.'),
       hLine('«Регионы» — домен текущего сайта проверяют десятки сканеров по России (cheburcheck.ru): видно, блокировка общая или только у вашего оператора. Долго (~1-2 мин), кэш 6 ч.'),
       hLine('Иконки в шапке: обновить (перезагрузить сайт и собрать заново) · шестерёнка (подключение к Clash API роутера Podkop/Forkop/NetShift) · тема · корзина (очистить) · «—» (свернуть).'),
-      hLine('«Список» — скопировать весь список доменов в буфер обмена.'),
+      hLine('«Список» — скопировать весь список доменов в буфер обмена · «Проблемные» — только заблокированные и «не в прокси» (готовый список для прокси-листа роутера).'),
+      hLine('Шестерёнка также содержит: режим сбора ссылок (все / только внутренние / не собирать) и игнор-лист с масками (*.doubleclick.net, ads.*, *betting* — домены по маскам не собираются вовсе).'),
       hSec('Статусы (проверка у вашего провайдера)'),
       hLine('● OK — доступен (зелёная точка)'),
       hLine('● DPI — сброс соединения, похоже на блокировку по имени домена (SNI)'),
@@ -1370,7 +1454,14 @@
       chbPump();
     };
 
-    btnGroup.append(reloadBtn, modeBtn, copyBtn, checkBtn, chbBtn, gearBtn, helpBtn, themeBtn, clearBtn, minBtn);
+    probBtn.onclick = () => {
+      const rows = rowsFor().filter((r) => r.st === 'bad');
+      const text = [...new Set(rows.map((r) => r.host))].sort((a, b) => getRoot(a).localeCompare(getRoot(b)) || a.localeCompare(b)).join('\n');
+      if (!text) { flashStatus('Проблемных доменов нет — сначала нажмите «Проверить»'); return; }
+      copyText(text).then((okk) => flashStatus(okk ? 'Скопировано проблемных: ' + rows.length : 'Не удалось скопировать'));
+    };
+
+    btnGroup.append(reloadBtn, modeBtn, copyBtn, probBtn, checkBtn, chbBtn, gearBtn, helpBtn, themeBtn, clearBtn, minBtn);
     box.append(header, filters, list, help, statusbar, routebar, settings);
     document.documentElement.append(pill, box);
     // анимация пульсации точки «проверка» + восстановление сохранённой позиции панели
