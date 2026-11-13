@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.5
+// @version      4.6
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -1062,7 +1062,21 @@
 
     const box = document.createElement('div');
     box.id = '__dsnf3_box';
-    Object.assign(box.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 2147483647, width: '640px', maxWidth: 'calc(100vw - 20px)', display: 'none', background: blurOK ? 'var(--glass)' : 'var(--glass-solid)', backdropFilter: blurOK ? 'blur(24px) saturate(1.5)' : 'none', WebkitBackdropFilter: blurOK ? 'blur(24px) saturate(1.5)' : 'none', color: 'var(--txt)', border: '1px solid var(--border)', borderRadius: '16px', font: '12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', boxShadow: 'var(--shadow), inset 0 1px 0 var(--hl)', padding: '12px' });
+    Object.assign(box.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 2147483647, width: '640px', maxWidth: 'calc(100vw - 20px)', maxHeight: 'calc(100vh - 24px)', display: 'none', flexDirection: 'column', background: blurOK ? 'var(--glass)' : 'var(--glass-solid)', backdropFilter: blurOK ? 'blur(24px) saturate(1.5)' : 'none', WebkitBackdropFilter: blurOK ? 'blur(24px) saturate(1.5)' : 'none', color: 'var(--txt)', border: '1px solid var(--border)', borderRadius: '16px', font: '12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', boxShadow: 'var(--shadow), inset 0 1px 0 var(--hl)', padding: '12px' });
+
+    // панель не должна вылезать за экран (например, при 125% зуме и открытом ⚙)
+    const clampPanel = () => {
+      try {
+        const r = box.getBoundingClientRect();
+        if (r.top < 8 || r.bottom > window.innerHeight - 8 || r.right > window.innerWidth - 4) {
+          box.style.top = Math.max(8, Math.min(r.top, window.innerHeight - r.height - 8)) + 'px';
+          box.style.left = Math.max(4, Math.min(r.left, window.innerWidth - r.width - 4)) + 'px';
+          box.style.right = 'auto';
+          box.style.bottom = 'auto';
+        }
+      } catch {}
+    };
+    window.addEventListener('resize', clampPanel);
 
     const applyTheme = () => {
       const L = isLight();
@@ -1140,7 +1154,7 @@
 
     // настройки подключения к Clash API
     const settings = document.createElement('div');
-    Object.assign(settings.style, { display: 'none', marginTop: '10px', borderTop: '1px solid var(--border-soft)', paddingTop: '10px' });
+    Object.assign(settings.style, { display: 'none', marginTop: '10px', borderTop: '1px solid var(--border-soft)', paddingTop: '10px', flex: '0 1 auto', minHeight: '80px', overflowY: 'auto' });
     const urlIn = document.createElement('input');
     urlIn.placeholder = 'Clash API, напр. http://192.168.1.1:9090';
     Object.assign(urlIn.style, { display: 'block', width: '100%', boxSizing: 'border-box', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '8px', color: 'var(--txt)', font: 'inherit', fontSize: '11px', padding: '5px 8px', marginBottom: '6px' });
@@ -1205,10 +1219,11 @@
         try { igTa.value = String(gmGet('__dsnf3_ignore', '') || ''); } catch {}
         lmSel.value = LINKMODE;
       }
+      requestAnimationFrame(clampPanel); // после роста панели — вписать её в экран
     };
 
     const list = document.createElement('div');
-    Object.assign(list.style, { maxHeight: '420px', overflow: 'auto', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '10px', padding: '6px', userSelect: 'text' });
+    Object.assign(list.style, { maxHeight: '420px', minHeight: '120px', flex: '0 1 auto', overflow: 'auto', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '10px', padding: '6px', userSelect: 'text' });
 
     // фильтры-чипсы: сразу видно, сколько проблем и сколько доступно
     const filters = document.createElement('div');
@@ -1240,7 +1255,7 @@
 
     // вся документация — внутри панели по кнопке «?»
     const help = document.createElement('div');
-    Object.assign(help.style, { display: 'none', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '10px', padding: '10px 12px', fontSize: '11px', lineHeight: '1.55', color: 'var(--txt)', overflow: 'auto', maxHeight: '420px', userSelect: 'text' });
+    Object.assign(help.style, { display: 'none', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '10px', padding: '10px 12px', fontSize: '11px', lineHeight: '1.55', color: 'var(--txt)', overflow: 'auto', maxHeight: '420px', minHeight: '120px', flex: '0 1 auto', userSelect: 'text' });
     const hSec = (txt) => { const e = document.createElement('div'); e.textContent = txt; Object.assign(e.style, { color: 'var(--accent)', fontWeight: '700', margin: '10px 0 3px', letterSpacing: '.02em' }); return e; };
     const hLine = (txt) => { const e = document.createElement('div'); e.textContent = txt; Object.assign(e.style, { marginBottom: '3px' }); return e; };
     help.append(
@@ -1524,7 +1539,7 @@
     };
     renderFn = render;
 
-    const syncVisibility = () => { pill.style.display = isOpen ? 'none' : 'flex'; box.style.display = isOpen ? 'block' : 'none'; };
+    const syncVisibility = () => { pill.style.display = isOpen ? 'none' : 'flex'; box.style.display = isOpen ? 'flex' : 'none'; };
     pill.onclick = () => { isOpen = true; setOpen(true); syncVisibility(); if (ROUTE.ok) startRoutePolling(); render(); };
     helpBtn.onclick = () => { showHelp = !showHelp; render(); };
     themeBtn.onclick = () => { theme = theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto'; try { gmSet(THEME_KEY, theme); } catch {} applyTheme(); };
