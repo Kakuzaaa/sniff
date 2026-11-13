@@ -1,28 +1,71 @@
-# 🌐 Domain Sniffer Pro
+<div align="center">
+  <h1>🌐 Domain Sniffer Pro</h1>
+  <p>Userscript для <b>Tampermonkey / Violentmonkey</b>: собирает все домены сайта, определяет блокировки (DPI / IP / 16-20КБ / замедление), показывает, <b>кто идёт через прокси, а кто напрямую</b>, и проверяет доступность <b>по регионам РФ</b>.</p>
 
-Userscript для **Tampermonkey / Violentmonkey**: собирает все домены и поддомены, которые загружает сайт, определяет, **какие из них заблокированы** (и каким способом), показывает, **кто идёт через прокси, а кто напрямую**, и умеет проверять блокировки **по регионам РФ**.
+[![Версия](https://img.shields.io/github/v/tag/Kakuzaaa/sniff?label=Версия&sort=semver&color=blue)](https://github.com/Kakuzaaa/sniff/releases/latest)
+[![Лицензия](https://img.shields.io/github/license/Kakuzaaa/sniff?label=Лицензия&color=success)](LICENSE)
+[![Размер](https://img.shields.io/github/repo-size/Kakuzaaa/sniff?label=Размер)]()
+
+[Установка](#-установка) ·
+[Возможности](#-возможности) ·
+[Быстрый старт](#-быстрый-старт) ·
+[Обновления](#-обновления) ·
+[Приватность](#-приватность)
+
+[![Установить](https://img.shields.io/badge/Установить-в_один_клик-009688?style=for-the-badge)](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.2/domain-sniffer-pro.user.js)
+[![Releases](https://img.shields.io/badge/Скачать-GitHub_Releases-181717?style=for-the-badge)](https://github.com/Kakuzaaa/sniff/releases/latest)
+[![Raw](https://img.shields.io/badge/Прямая_ссылка-GitHub_Raw-0969DA?style=for-the-badge)](https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js)
+</div>
 
 ---
 
 ## 📦 Установка
 
-1. Установите расширение [Tampermonkey](https://www.tampermonkey.net/) (Chrome/Edge/Firefox) или [Violentmonkey](https://violentmonkey.github.io/).
-2. Откройте ссылку на скрипт (CDN jsDelivr — доступнее в РФ, чем GitHub raw) — менеджер предложит установить:
-   **[Установить Domain Sniffer Pro v4.2](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.2/domain-sniffer-pro.user.js)**
+> [!NOTE]
+> Это юзерскрипт — нужен загрузчик: **[Tampermonkey](https://www.tampermonkey.net/)** (Chrome, Edge, Firefox) или **[Violentmonkey](https://violentmonkey.github.io/)** (хороший выбор для Opera).
 
-   > Ссылка ведёт на зафиксированный релиз-тег `v3.7` — она всегда отдаёт именно эту версию, без CDN-кэша. Обновления прилетают автоматически (проверка раз в сутки, до 12 ч задержка после пуша).
-3. При установке подтвердите запрос доступа ко всем сайтам (он нужен для перехвата запросов сайта и живых проверок блокировок).
-4. Обновления приходят автоматически — скрипт тянется с CDN этого репозитория.
+### Способ 1 — в один клик (рекомендуется)
+
+1. Установите загрузчик юзерскриптов (ссылки выше)
+2. Откройте **[ссылку установки](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.2/domain-sniffer-pro.user.js)** — менеджер сам предложит установить скрипт
+3. Подтвердите запрос доступа ко всем сайтам (нужен для перехвата запросов сайта и живых проверок блокировок)
+
+> Ссылка ведёт на зафиксированный релиз-тег `v4.2` — CDN jsDelivr доступнее в РФ, чем GitHub raw, и у тега нет кэш-задержки. Обновления приходят автоматически — [подробнее](#-обновления).
+
+### Способ 2 — из GitHub Releases
+
+1. Откройте **[Releases](https://github.com/Kakuzaaa/sniff/releases/latest)** и скачайте `domain-sniffer-pro.user.js`
+2. Откройте скачанный файл в браузере (или перетащите его на страницу Tampermonkey → «Утилиты» → «Импорт из файла»)
+3. Подтвердите установку
+
+> [!WARNING]
+> **Tampermonkey 5.2+ на Chromium** (Chrome / Edge / Brave / Vivaldi): может понадобиться
+> 1. включить «Режим разработчика» на странице `chrome://extensions` ([справка Tampermonkey](https://www.tampermonkey.net/faq.php#Q209));
+> 2. при Chromium 138+ — в «Сведениях» расширения включить «Разрешить пользовательские скрипты».
+
+### Способ 3 — ручная установка (всегда работает)
+
+1. Откройте [файл скрипта](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.2/domain-sniffer-pro.user.js) и скопируйте всё (`Ctrl+A` → `Ctrl+C`)
+2. Иконка Tampermonkey → «Юзерскрипты» → вкладка «+» → вставьте (`Ctrl+V`) → сохраните (`Ctrl+S`)
+
+### Способ 4 — импорт по URL
+
+Иконка Tampermonkey → **«Утилиты»** → «Импорт из URL» → вставьте:
+
+```
+https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.2/domain-sniffer-pro.user.js
+```
+
+→ «Установить».
 
 ### Если установка не сработала
 
-Открылась страница Tampermonkey «Script installation», а диалог установки не появился? Так бывает, когда расширение не смогло скачать файл (raw.githubusercontent.com в РФ часто режется провайдером, а VPN-расширение в браузере может не покрывать запросы самого Tampermonkey). Способы обойти:
+Страница Tampermonkey «Script installation» висит без диалога установки? Так бывает, когда расширение не смогло скачать файл — в РФ `raw.githubusercontent.com` часто режется провайдером, а VPN-расширение в браузере может не покрывать запросы самого Tampermonkey. Основные ссылки тут идут через jsDelivr, но если и он подводит:
 
-1. **Ручная установка (всегда работает):** откройте [файл скрипта](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.2/domain-sniffer-pro.user.js) → выделите всё (`Ctrl+A`) → скопируйте (`Ctrl+C`) → иконка Tampermonkey → «Юзерскрипты» → вкладка «+» → вставить (`Ctrl+V`) → `Ctrl+S` (Файл → Сохранить).
-2. **Импорт по ссылке:** иконка Tampermonkey → «Утилиты» → «Импорт из URL» → вставьте `https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.2/domain-sniffer-pro.user.js` → «Установить».
-3. **Классическая ссылка GitHub:** [raw.githubusercontent.com/…/domain-sniffer-pro.user.js](https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js) — сработает, если GitHub raw у вас не заблокирован.
-4. Если Tampermonkey показывает бесконечную промежуточную страницу: в настройках Tampermonkey включите режим конфигурации «Дополнительно» и включите «Мгновенная установка» (Instant installation) — промежуточная страница перестанет открываться, диалог будет появляться сразу.
-5. Если CDN тормозит со свежими правками: сброс кэша jsDelivr — [purge-инструмент](https://www.jsdelivr.com/tools/purge), вставьте `https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js`.
+- включите в настройках Tampermonkey режим «Дополнительно» и «Мгновенная установка» (Instant installation) — промежуточная страница перестанет открываться, диалог появится сразу;
+- попробуйте прямую ссылку GitHub: [raw…/domain-sniffer-pro.user.js](https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js);
+- сброс кэша jsDelivr: [purge-инструмент](https://www.jsdelivr.com/tools/purge) + URL `https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js`;
+- крайний случай — [способ 3](#способ-3--ручная-установка-всегда-работает), он не зависит ни от чего.
 
 ## ✨ Возможности
 
@@ -77,6 +120,13 @@ Userscript для **Tampermonkey / Violentmonkey**: собирает все до
 4. «Регионы» — проверить домен по всем операторам РФ.
 5. Клик по имени домена в списке (или иконке копирования) — скопировать этот домен отдельно; клик по остальной строке — перепроверить его.
 6. «?» в панели — встроенная справка по всем статусам и кнопкам.
+
+## 🔄 Обновления
+
+- **Автоматически**: Tampermonkey раз в сутки проверяет `@updateURL` (jsDelivr `@main`) — новая версия появляется в течение ~12 часов после релиза; интервал проверки настраивается в настройках Tampermonkey.
+- **Вручную**: дашборд → «Юзерскрипты» → кнопка «Проверить обновления»; или откройте настройки скрипта → «Проверить обновления скриптов».
+- Текущая версия — в колонке «Версия» дашборда или в шапке файла (`@version`); актуальная — на странице [последнего релиза](https://github.com/Kakuzaaa/sniff/releases/latest).
+- Если «Обновлений не найдено», а релиз уже вышел — это кэш CDN: откройте [purge-ссылку](https://purge.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js) и повторите проверку.
 
 ## 🔒 Приватность
 
