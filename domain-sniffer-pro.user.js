@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      3.5
+// @version      3.6
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -987,7 +987,8 @@
       hLine('🔴 — заблокирован И идёт напрямую: добавьте этот домен в прокси-лист роутера, и сайт заработает.'),
       hSec('Мелочи'),
       hLine('🌍 на строке — регион-чек этого домена по РФ'),
-      hLine('клик по строке — перепроверить один домен · число справа — задержка в мс'),
+      hLine('клик по имени домена или 📋 — скопировать этот домен'),
+      hLine('клик по остальной строке — перепроверить один домен · число справа — задержка в мс'),
       hLine('Список доменов и статусы сохраняются при переходах по сайту (до закрытия вкладки).'),
     );
 
@@ -997,6 +998,20 @@
     const routebar = document.createElement('div');
     Object.assign(routebar.style, { marginTop: '2px', fontSize: '10px', lineHeight: '1.5', color: '#79c0ff' });
     routebar.title = 'Маршрутизация: кто идёт через прокси (🚀), кто напрямую (⬇). Без Clash API — только внешний IP/сплит';
+
+    // копирование в буфер (Clipboard API + запасной textarea); feedback — в статус-строке
+    const copyText = async (text) => {
+      try { await navigator.clipboard.writeText(text); return true; } catch {}
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        Object.assign(ta.style, { position: 'fixed', left: '-9999px', top: '0' });
+        document.documentElement.appendChild(ta);
+        ta.select(); document.execCommand('copy'); ta.remove();
+        return true;
+      } catch { return false; }
+    };
+    const flashStatus = (msg) => { statusMsg = msg; renderSoon(); setTimeout(() => { if (statusMsg === msg) { statusMsg = ''; renderSoon(); } }, 2000); };
 
     const CHIP_STYLE = {
       ok:   { bg: 'rgba(63,185,80,.15)',  fg: '#3fb950' },
@@ -1022,8 +1037,25 @@
       const host = document.createElement('span');
       host.textContent = r.host;
       Object.assign(host.style, { flex: '1 1 auto', minWidth: '0', overflowWrap: 'anywhere', color: mood === 'bad' ? '#ffb0ac' : '#e6edf3' });
+      host.style.cursor = 'pointer';
+      host.title = 'Нажмите, чтобы скопировать домен';
+      host.onclick = (ev) => {
+        ev.stopPropagation(); // не запускаем перепроверку строки
+        copyText(r.host).then((okk) => flashStatus(okk ? '📋 Скопировано: ' + r.host : '⚠️ Не удалось скопировать'));
+      };
       l1.append(chip, host);
       if (r.ms) { const ms = document.createElement('span'); ms.textContent = r.ms + 'мс'; Object.assign(ms.style, { flex: '0 0 auto', color: '#8b949e', fontSize: '10px' }); l1.append(ms); }
+      const cb = document.createElement('span');
+      cb.textContent = '📋';
+      cb.title = 'Скопировать этот домен';
+      Object.assign(cb.style, { flex: '0 0 auto', cursor: 'pointer', opacity: '.8', fontSize: '11px' });
+      cb.onmouseenter = () => { cb.style.opacity = '1'; };
+      cb.onmouseleave = () => { cb.style.opacity = '.8'; };
+      cb.onclick = (ev) => {
+        ev.stopPropagation();
+        copyText(r.host).then((okk) => flashStatus(okk ? '📋 Скопировано: ' + r.host : '⚠️ Не удалось скопировать'));
+      };
+      l1.append(cb);
       if (hasGM && r.host && r.host.includes('.')) {
         const rb = document.createElement('span');
         rb.textContent = '🌍';
@@ -1167,18 +1199,8 @@
     modeBtn.onclick = () => { rootOnly = !rootOnly; modeBtn.textContent = rootOnly ? 'Корневые' : 'Поддомены'; render(); };
     clearBtn.onclick = () => { domains.clear(); info.clear(); queue.length = 0; try { sessionStorage.removeItem(SKEY); } catch {} render(); };
     copyBtn.onclick = async () => {
-      const text = getListText();
-      try { await navigator.clipboard.writeText(text); } catch {
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          Object.assign(ta.style, { position: 'fixed', left: '-9999px', top: '0' });
-          document.documentElement.appendChild(ta);
-          ta.select(); document.execCommand('copy'); ta.remove();
-        } catch {}
-      }
-      copyBtn.textContent = 'Готово ✓';
-      setTimeout(() => { copyBtn.textContent = 'Копировать'; }, 1200);
+      if (await copyText(getListText())) { copyBtn.textContent = 'Готово ✓'; setTimeout(() => { copyBtn.textContent = 'Копировать'; }, 1200); }
+      else flashStatus('⚠️ Не удалось скопировать список');
     };
     checkBtn.onclick = () => { checkAll(); };
     chbBtn.onclick = () => {
