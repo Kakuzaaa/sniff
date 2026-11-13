@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.2
+// @version      4.3
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -1051,7 +1051,7 @@
     };
 
     const header = document.createElement('div');
-    Object.assign(header.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '10px', cursor: 'move', userSelect: 'none' });
+    Object.assign(header.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '8px', cursor: 'move', userSelect: 'none' });
     const hLeft = document.createElement('div');
     Object.assign(hLeft.style, { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 1 auto', overflow: 'hidden' });
     const grip = svgIcon('grip', 14);
@@ -1061,7 +1061,7 @@
     Object.assign(title.style, { fontSize: '12px', fontWeight: '700', letterSpacing: '.02em', color: 'var(--txt)', whiteSpace: 'nowrap' });
     hLeft.append(grip, title);
     const btnGroup = document.createElement('div');
-    Object.assign(btnGroup.style, { display: 'flex', gap: '4px', flexWrap: 'wrap' });
+    Object.assign(btnGroup.style, { display: 'flex', gap: '3px', alignItems: 'center', flex: '0 0 auto' });
     header.append(hLeft, btnGroup);
 
     // перетаскивание панели за шапку + запоминание позиции
@@ -1096,6 +1096,10 @@
     const minBtn = mkBtn('—', 'Свернуть');
     const gearBtn = mkBtn('', 'Маршрут через прокси: подключение к Clash API роутера/ПК (Podkop/Forkop/NetShift/sing-box/clash)', 'gear');
     applyTheme();
+
+    // строка действий (текстовые кнопки) — под шапкой, чтобы ничего не ломалось на узких экранах
+    const actionRow = document.createElement('div');
+    Object.assign(actionRow.style, { display: 'flex', gap: '5px', marginBottom: '8px', flexWrap: 'wrap' });
 
     // настройки подключения к Clash API
     const settings = document.createElement('div');
@@ -1188,6 +1192,15 @@
     chipNet.onclick = () => { linkOnly = !linkOnly; try { gmSet('__dsnf3_linkonly', linkOnly); } catch {} render(); };
     chipNet.title = 'Переключить: только реально загруженные домены / все вместе с доменами-ссылками';
 
+    // живой поиск по доменам
+    let query = '';
+    const searchIn = document.createElement('input');
+    searchIn.placeholder = 'Поиск по доменам…';
+    searchIn.title = 'Живой фильтр: показываются домены, содержащие введённый текст (Esc — очистить)';
+    Object.assign(searchIn.style, { display: 'block', width: '100%', boxSizing: 'border-box', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '999px', color: 'var(--txt)', font: 'inherit', fontSize: '11px', padding: '5px 12px', outline: 'none', marginBottom: '8px' });
+    searchIn.oninput = () => { query = searchIn.value.trim().toLowerCase(); render(); };
+    searchIn.onkeydown = (e) => { if (e.key === 'Escape') { searchIn.value = ''; query = ''; render(); } };
+
     // вся документация — внутри панели по кнопке «?»
     const help = document.createElement('div');
     Object.assign(help.style, { display: 'none', background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '10px', padding: '10px 12px', fontSize: '11px', lineHeight: '1.55', color: 'var(--txt)', overflow: 'auto', maxHeight: '420px', userSelect: 'text' });
@@ -1219,6 +1232,7 @@
       hLine('клик по имени домена или иконке копирования — скопировать этот домен'),
       hLine('клик по остальной строке — перепроверить один домен · число справа — задержка в мс'),
       hLine('По умолчанию показываются только домены, которые страница реально загружала. Чип «Только трафик» переключает: появятся домены-ссылки — приглушённые строки с бейджем «ссылка» внизу списка (результаты поиска, футеры, README — страница их не загружала).'),
+      hLine('Строка поиска над списком — живой фильтр по подстроке (Esc — очистить).'),
       hLine('Шапку можно тащить мышью — позиция запоминается.'),
       hLine('Список доменов и статусы сохраняются при переходах по сайту (до закрытия вкладки).'),
     );
@@ -1245,20 +1259,34 @@
     const flashStatus = (msg) => { statusMsg = msg; renderSoon(); setTimeout(() => { if (statusMsg === msg) { statusMsg = ''; renderSoon(); } }, 2000); };
 
     // бейдж статуса: цветная точка + короткая подпись (без эмодзи)
+    // бейдж статуса: цветная точка + подпись; непроверенные — тихая полая точка без чипа
     const mkBadge = (badge, busy) => {
       const wrap = document.createElement('span');
-      Object.assign(wrap.style, { display: 'inline-flex', alignItems: 'center', gap: '5px', flex: '0 0 auto', padding: '3px 8px', borderRadius: '7px', background: 'var(--chip)', whiteSpace: 'nowrap' });
+      Object.assign(wrap.style, { display: 'inline-flex', alignItems: 'center', gap: '5px', flex: '0 0 auto', padding: '3px 8px', borderRadius: '7px', whiteSpace: 'nowrap' });
       const dot = document.createElement('span');
-      const b = badge || {};
       dot.style.width = '7px'; dot.style.height = '7px'; dot.style.borderRadius = '50%';
-      dot.style.background = busy ? '#58a6ff' : (b.c || '#8b949e');
-      if (busy) dot.style.animation = '__dsnf3_pulse 1.2s ease-in-out infinite';
       const label = document.createElement('span');
-      label.textContent = busy ? 'проверка' : (b.t || '—');
-      label.style.color = busy ? '#58a6ff' : (b.c || 'var(--muted)');
       label.style.fontSize = '10px';
       label.style.fontWeight = '600';
-      wrap.append(dot, label);
+      if (busy) {
+        wrap.style.background = 'var(--chip)';
+        dot.style.background = '#58a6ff';
+        dot.style.animation = '__dsnf3_pulse 1.2s ease-in-out infinite';
+        label.textContent = 'проверка';
+        label.style.color = '#58a6ff';
+        wrap.append(dot, label);
+      } else if (badge && badge.t) {
+        wrap.style.background = 'var(--chip)';
+        dot.style.background = badge.c || 'var(--muted)';
+        label.textContent = badge.t;
+        label.style.color = badge.c || 'var(--muted)';
+        wrap.append(dot, label);
+      } else {
+        dot.style.border = '1.5px solid var(--muted)';
+        dot.style.opacity = '.5';
+        wrap.style.padding = '3px 4px';
+        wrap.append(dot);
+      }
       return wrap;
     };
 
@@ -1327,6 +1355,7 @@
         for (const h of domains.keys()) {
           const rec = domains.get(h) || {};
           if (linkOnly && !rec.net) continue; // «Только трафик»: скрыть домены-ссылки
+          if (query && !h.includes(query)) continue; // живой поиск
           const s = info.get(h) || {};
           const parts = [];
           let danger = !!(s.status && s.status.blocked && s.route && s.route.direct);
@@ -1360,6 +1389,7 @@
           const rec = domains.get(h) || {};
           if (linkOnly && !rec.net) continue;
           const r = getRoot(h);
+          if (query && !r.includes(query)) continue;
           let e = map.get(r);
           if (!e) { e = { host: r, subs: 0, blocked: 0, checked: 0, prox: 0, direct: 0 }; map.set(r, e); }
           e.subs++;
@@ -1425,22 +1455,26 @@
       list.style.display = showHelp ? 'none' : 'block';
       helpBtn.style.background = showHelp ? 'var(--accent)' : 'var(--btn)';
       helpBtn.style.color = showHelp ? '#fff' : 'var(--txt)';
-      const sig = JSON.stringify([rootOnly, statusMsg, running, queue.length, REG.t, REG.err, viewFilter, showHelp, linkOnly, all.length, badN, okN, rows.map((r) => [r.host, r.badge && r.badge.t, r.tag, r.blocked, r.busy])]);
+      const sig = JSON.stringify([rootOnly, statusMsg, running, queue.length, REG.t, REG.err, viewFilter, showHelp, linkOnly, query, all.length, badN, okN, rows.map((r) => [r.host, r.badge && r.badge.t, r.tag, r.blocked, r.busy])]);
       if (sig !== lastSig) {
         lastSig = sig;
+        const keepScroll = list.scrollTop; // сохраняем позицию прокрутки при перерисовке
         list.textContent = '';
         const frag = document.createDocumentFragment();
         if (!rows.length) {
           const d = document.createElement('div');
-          d.textContent = all.length
-            ? (viewFilter === 'bad' ? 'Проблемных доменов не найдено' : 'В этой категории пусто')
-            : 'Пока пусто: домены появятся, когда сайт начнёт что-то загружать. Нажмите «Проверить», чтобы проверить найденные.';
+          d.textContent = query
+            ? 'Ничего не найдено по запросу «' + query + '»'
+            : all.length
+              ? (viewFilter === 'bad' ? 'Проблемных доменов не найдено' : 'В этой категории пусто')
+              : 'Пока пусто: домены появятся, когда сайт начнёт что-то загружать. Нажмите «Проверить», чтобы проверить найденные.';
           Object.assign(d.style, { color: 'var(--muted)', padding: '8px 4px' });
           frag.append(d);
         } else {
           rows.forEach((r) => frag.append(mkRow(r)));
         }
         list.append(frag);
+        list.scrollTop = keepScroll;
       }
       const rt = ROUTE.ok
         ? 'Маршрут: ' + ROUTE.base.replace(/^https?:\/\//, '') + (ROUTE.lastPoll ? ' · опрос ' + new Date(ROUTE.lastPoll).toLocaleTimeString('ru-RU') : '')
@@ -1479,8 +1513,9 @@
       copyText(text).then((okk) => flashStatus(okk ? 'Скопировано проблемных: ' + rows.length : 'Не удалось скопировать'));
     };
 
-    btnGroup.append(reloadBtn, modeBtn, copyBtn, probBtn, checkBtn, chbBtn, gearBtn, helpBtn, themeBtn, clearBtn, minBtn);
-    box.append(header, filters, list, help, statusbar, routebar, settings);
+    btnGroup.append(reloadBtn, gearBtn, helpBtn, themeBtn, clearBtn, minBtn);
+    actionRow.append(checkBtn, chbBtn, copyBtn, probBtn, modeBtn);
+    box.append(header, actionRow, filters, searchIn, list, help, statusbar, routebar, settings);
     document.documentElement.append(pill, box);
     // анимация пульсации точки «проверка» + восстановление сохранённой позиции панели
     if (!document.getElementById('__dsnf3_style')) {
