@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.1
+// @version      4.2
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -187,9 +187,14 @@
 
   const baseHref = () => { try { return document.baseURI || location.href; } catch { return location.href; } };
 
-  // мост iframe → верхний фрейм
-  let sendTimer = 0; const pendingSend = new Set();
-  const flushSend = () => { if (!pendingSend.size) return; const hosts = [...pendingSend]; pendingSend.clear(); try { window.top.postMessage({ __dsnf3: hosts }, '*'); } catch {} };
+  // мост iframe → верхний фрейм (передаём и источник: 'net' сильнее 'dom')
+  let sendTimer = 0; const pendingSend = new Map();
+  const flushSend = () => {
+    if (!pendingSend.size) return;
+    const hosts = [...pendingSend].map(([h, s]) => [h, s]);
+    pendingSend.clear();
+    try { window.top.postMessage({ __dsnf3: hosts }, '*'); } catch {}
+  };
   const scheduleSend = () => { if (sendTimer) return; sendTimer = setTimeout(() => { sendTimer = 0; flushSend(); }, 700); };
 
   const addHost = (rawHost, src) => {
@@ -208,7 +213,11 @@
     const rec = domains.get(host);
     if (rec) { rec[src] = true; return false; }                      // источник дополняем даже у знакомых
     domains.set(host, { net: src === 'net', dom: src === 'dom' });
-    if (!isTop) { pendingSend.add(host); scheduleSend(); }
+    if (!isTop) {
+      const prev = pendingSend.get(host);
+      if (prev !== 'net') pendingSend.set(host, src);
+      scheduleSend();
+    }
     scheduleSave(); renderSoon();
     return true;
   };
@@ -226,7 +235,7 @@
       }
     } catch {}
   };
-  if (isTop) { try { window.addEventListener('message', (e) => { const d = e && e.data; if (d && Array.isArray(d.__dsnf3)) d.__dsnf3.forEach(addHost); }); } catch {} }
+  if (isTop) { try { window.addEventListener('message', (e) => { const d = e && e.data; if (d && Array.isArray(d.__dsnf3)) d.__dsnf3.forEach((p) => addHost(p[0], p[1])); }); } catch {} }
 
   // ────────────────── ПЕРЕХВАТ ЗАПРОСОВ (в контексте страницы) ──────────────────
   const patchPage = () => {
@@ -296,7 +305,16 @@
 
   // ────────────────── СЕТЕВОЙ БУФЕР БРАУЗЕРА ──────────────────
   try { performance.setResourceTimingBufferSize && performance.setResourceTimingBufferSize(20000); } catch {}
-  try { new PerformanceObserver((l) => { l.getEntries().forEach((e) => addUrl(e.name)); }).observe({ type: 'resource', buffered: true }); } catch {}
+  try {
+    new PerformanceObserver((l) => {
+      l.getEntries().forEach((e) => {
+        // спекулятивные запросы Chrome (prefetch/prerender ссылок из выдачи) —
+        // по смыслу это «ссылки», а не трафик страницы
+        const spec = e.deliveryType === 'prefetch' || e.deliveryType === 'prerender';
+        addUrl(e.name, spec ? 'dom' : 'net');
+      });
+    }).observe({ type: 'resource', buffered: true });
+  } catch {}
 
   // ────────────────── СКАН DOM И CSS ──────────────────
   const URL_RE = /url\(\s*['"]?([^'")]+)['"]?\s*\)/gi;
