@@ -8,7 +8,7 @@ Userscript для **Tampermonkey / Violentmonkey**: собирает все до
 
 1. Установите расширение [Tampermonkey](https://www.tampermonkey.net/) (Chrome/Edge/Firefox) или [Violentmonkey](https://violentmonkey.github.io/).
 2. Откройте ссылку на скрипт (CDN jsDelivr — доступнее в РФ, чем GitHub raw) — менеджер предложит установить:
-   **[Установить Domain Sniffer Pro v3.9](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v3.9/domain-sniffer-pro.user.js)**
+   **[Установить Domain Sniffer Pro v4.0](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.0/domain-sniffer-pro.user.js)**
 
    > Ссылка ведёт на зафиксированный релиз-тег `v3.7` — она всегда отдаёт именно эту версию, без CDN-кэша. Обновления прилетают автоматически (проверка раз в сутки, до 12 ч задержка после пуша).
 3. При установке подтвердите запрос доступа ко всем сайтам (он нужен для перехвата запросов сайта и живых проверок блокировок).
@@ -18,8 +18,8 @@ Userscript для **Tampermonkey / Violentmonkey**: собирает все до
 
 Открылась страница Tampermonkey «Script installation», а диалог установки не появился? Так бывает, когда расширение не смогло скачать файл (raw.githubusercontent.com в РФ часто режется провайдером, а VPN-расширение в браузере может не покрывать запросы самого Tampermonkey). Способы обойти:
 
-1. **Ручная установка (всегда работает):** откройте [файл скрипта](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v3.9/domain-sniffer-pro.user.js) → выделите всё (`Ctrl+A`) → скопируйте (`Ctrl+C`) → иконка Tampermonkey → «Юзерскрипты» → вкладка «+» → вставить (`Ctrl+V`) → `Ctrl+S` (Файл → Сохранить).
-2. **Импорт по ссылке:** иконка Tampermonkey → «Утилиты» → «Импорт из URL» → вставьте `https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v3.9/domain-sniffer-pro.user.js` → «Установить».
+1. **Ручная установка (всегда работает):** откройте [файл скрипта](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.0/domain-sniffer-pro.user.js) → выделите всё (`Ctrl+A`) → скопируйте (`Ctrl+C`) → иконка Tampermonkey → «Юзерскрипты» → вкладка «+» → вставить (`Ctrl+V`) → `Ctrl+S` (Файл → Сохранить).
+2. **Импорт по ссылке:** иконка Tampermonkey → «Утилиты» → «Импорт из URL» → вставьте `https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.0/domain-sniffer-pro.user.js` → «Установить».
 3. **Классическая ссылка GitHub:** [raw.githubusercontent.com/…/domain-sniffer-pro.user.js](https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js) — сработает, если GitHub raw у вас не заблокирован.
 4. Если Tampermonkey показывает бесконечную промежуточную страницу: в настройках Tampermonkey включите режим конфигурации «Дополнительно» и включите «Мгновенная установка» (Instant installation) — промежуточная страница перестанет открываться, диалог будет появляться сразу.
 5. Если CDN тормозит со свежими правками: сброс кэша jsDelivr — [purge-инструмент](https://www.jsdelivr.com/tools/purge), вставьте `https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js`.
@@ -29,7 +29,7 @@ Userscript для **Tampermonkey / Violentmonkey**: собирает все до
 ### 1. Сбор доменов (с 0-й миллисекунды)
 - перехват `fetch` / `XHR` / `WebSocket` / `SSE` / `sendBeacon` / `WebRTC (STUN/TURN)`;
 - сетевой буфер браузера (PerformanceObserver) — даже неудачные запросы;
-- скан DOM и CSS (`src`, `href`, `srcset`, `url()`, `@import`, `<style>`) — собранные так домены-ссылки помечаются отдельно: чип **«Только трафик»** скрывает их (полезно на поисковых страницах, где выдача — это просто список ссылок на чужие сайты);
+- скан DOM и CSS (`src`, `href`, `srcset`, `url()`, `@import`, `<style>`) — собранные так **домены-ссылки** (страница их не загружала, они просто стоят ссылками: результаты поиска, футеры, README) по умолчанию скрыты; чип **«Только трафик»** переключает — приглушённые строки с бейджем «ссылка» показываются внизу списка;
 - домены из встроенных iframe (плееры, капча) пересылаются в родительскую страницу;
 - список накапливается при переходах по сайту.
 

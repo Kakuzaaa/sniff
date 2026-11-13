@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      3.9
+// @version      4.0
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -153,7 +153,7 @@
   const domains = new Map(); // host → { net: реально загружался, dom: был ссылкой в DOM }
   const info = new Map();    // host → { status:{primary,tag,blocked}, busy }
   let rootOnly = false;
-  let linkOnly = false;      // «Только трафик»: скрыть домены-ссылки
+  let linkOnly = (() => { try { return gmGet('__dsnf3_linkonly', true) !== false; } catch { return true; } })(); // по умолчанию «Только трафик»
   let statusMsg = '';
 
   // отложенный рендер (без UI во фреймах — просто no-op)
@@ -1084,8 +1084,8 @@
     // «Только трафик»: скрыть домены-ссылки (например, результаты поиска или футеры) —
     // показать лишь то, что страница реально загружала
     const chipNet = mkChip('net');
-    chipNet.onclick = () => { linkOnly = !linkOnly; render(); };
-    chipNet.title = 'Показать только домены, которые страница реально загружала (скрыть домены-ссылки: результаты поиска, футеры, упоминания)';
+    chipNet.onclick = () => { linkOnly = !linkOnly; try { gmSet('__dsnf3_linkonly', linkOnly); } catch {} render(); };
+    chipNet.title = 'Переключить: только реально загруженные домены / все вместе с доменами-ссылками';
 
     // вся документация — внутри панели по кнопке «?»
     const help = document.createElement('div');
@@ -1116,7 +1116,7 @@
       hLine('Иконка глобуса на строке — регион-чек этого домена по РФ'),
       hLine('клик по имени домена или иконке копирования — скопировать этот домен'),
       hLine('клик по остальной строке — перепроверить один домен · число справа — задержка в мс'),
-      hLine('Чип «Только трафик» — скрыть домены-ссылки (страница их не загружала, они просто стоят ссылками: результаты поиска, футеры, README). Приглушённые строки — это домены-ссылки.'),
+      hLine('По умолчанию показываются только домены, которые страница реально загружала. Чип «Только трафик» переключает: появятся домены-ссылки — приглушённые строки с бейджем «ссылка» внизу списка (результаты поиска, футеры, README — страница их не загружала).'),
       hLine('Шапку можно тащить мышью — позиция запоминается.'),
       hLine('Список доменов и статусы сохраняются при переходах по сайту (до закрытия вкладки).'),
     );
@@ -1163,11 +1163,12 @@
     const mkRow = (r) => {
       const mood = r.busy ? 'busy' : (r.st || 'none');
       const row = document.createElement('div');
-      Object.assign(row.style, { display: 'flex', flexDirection: 'column', gap: '1px', padding: '5px 7px', borderRadius: '9px', cursor: r.click ? 'pointer' : 'default', marginBottom: '3px', transition: 'background .1s ease' });
+      Object.assign(row.style, { display: 'flex', flexDirection: 'column', gap: '1px', padding: '5px 7px', borderRadius: '9px', cursor: r.click ? 'pointer' : 'default', marginBottom: '3px', transition: 'background .1s ease, opacity .15s ease' });
       if (mood === 'bad') row.style.background = 'var(--badbg)';
       if (r.danger) row.style.borderLeft = '2px solid #f85149';
-      row.onmouseenter = () => { row.style.background = mood === 'bad' ? 'var(--badbg)' : 'var(--row-hover)'; if (mood === 'bad') row.style.filter = 'brightness(1.25)'; };
-      row.onmouseleave = () => { row.style.background = mood === 'bad' ? 'var(--badbg)' : 'transparent'; row.style.filter = ''; };
+      if (r.linkOnly) row.style.opacity = '.58'; // наглядно: домен-ссылка приглушён целиком
+      row.onmouseenter = () => { row.style.background = mood === 'bad' ? 'var(--badbg)' : 'var(--row-hover)'; row.style.opacity = '1'; };
+      row.onmouseleave = () => { row.style.background = mood === 'bad' ? 'var(--badbg)' : 'transparent'; row.style.opacity = r.linkOnly ? '.58' : '1'; };
 
       const l1 = document.createElement('div');
       Object.assign(l1.style, { display: 'flex', alignItems: 'center', gap: '9px' });
@@ -1175,9 +1176,8 @@
       const host = document.createElement('span');
       host.textContent = r.host;
       Object.assign(host.style, { flex: '1 1 auto', minWidth: '0', overflowWrap: 'anywhere', color: mood === 'bad' ? 'var(--bad)' : 'var(--txt)' });
-      if (r.linkOnly) host.style.opacity = '.6';
       host.style.cursor = 'pointer';
-      host.title = 'Нажмите, чтобы скопировать домен' + (r.linkOnly ? ' · домен-ссылка: страница его не загружала, он просто стоит ссылкой' : '');
+      host.title = 'Нажмите, чтобы скопировать домен' + (r.linkOnly ? ' · домен-ссылка: страница его не загружала, он просто стоит ссылкой на странице' : '');
       host.onclick = (ev) => {
         ev.stopPropagation(); // не запускаем перепроверку строки
         copyText(r.host).then((okk) => flashStatus(okk ? 'Скопировано: ' + r.host : 'Не удалось скопировать'));
@@ -1238,6 +1238,7 @@
           if (danger) badge = { t: 'не в прокси', c: '#f85149' };
           else if (s.status && s.status.primary && KIND_META[s.status.primary]) badge = { t: KIND_META[s.status.primary].t, c: KIND_META[s.status.primary].c };
           else if (s.status && s.status.blocked) badge = { t: 'в реестре', c: '#a371f7' };
+          else if (!rec.net) badge = { t: 'ссылка', c: '#8b949e' }; // наглядная пометка домена-ссылки
           out.push({
             host: h,
             badge,
@@ -1282,8 +1283,8 @@
           });
         }
       }
-      // проблемные — всегда сверху
-      out.sort((a, b) => ((b.blocked ? 1 : 0) - (a.blocked ? 1 : 0)) || ((b.danger ? 1 : 0) - (a.danger ? 1 : 0)) || getRoot(a.host).localeCompare(getRoot(b.host)) || a.host.localeCompare(b.host));
+      // проблемные — сверху, домены-ссылки — внизу
+      out.sort((a, b) => ((b.blocked ? 1 : 0) - (a.blocked ? 1 : 0)) || ((b.danger ? 1 : 0) - (a.danger ? 1 : 0)) || ((a.linkOnly ? 1 : 0) - (b.linkOnly ? 1 : 0)) || getRoot(a.host).localeCompare(getRoot(b.host)) || a.host.localeCompare(b.host));
       return out;
     };
 
