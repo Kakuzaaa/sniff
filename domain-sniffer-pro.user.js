@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.3
+// @version      4.4
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -606,7 +606,7 @@
   // Живая часть: /api/v1/probe/{id} — SSE-поток вердиктов от сканеров
   // в регионах РФ (region/provider/asn у каждого). Вердикты: sni_block /
   // tspu_block / dns_spoofing / cdn_block (16-20КБ) / whitelist / ok.
-  const CHB = { busy: false, active: '', parts: 0, online: 0 };
+  const CHB = { busy: false, active: '', parts: 0, online: 0, startedAt: 0, abort: null, cancelled: false };
   const chbQueue = [];
 
   const CHB_V = {
@@ -670,28 +670,40 @@
     gmSet('__dsnf3_chbs_' + host, { t: Date.now(), d: stat });
     if (!j.id) return { stat, agg: null };
     const probes = [];
-    const pos = { last: 0 };
-    const b = await gmReq({
-      url: CFG.chb.base + '/api/v1/probe/' + encodeURIComponent(j.id),
-      method: 'GET', timeout: CFG.chb.probeTimeoutMs,
-      headers: { accept: 'text/event-stream' },
-      onprogress: (e) => {
-        chbCollect(e.responseText, pos, (ev, d) => {
-          if (ev === 'started' && d.online_probes) CHB.online = d.online_probes;
-          else if (ev === 'result' && d.verdicts && !probes.some((p) => p.probe_id === d.probe_id)) {
-            probes.push(d); CHB.parts = probes.length;
-            onPart({ stat, agg: chbAgg(probes), parts: probes.length, online: CHB.online });
-          }
+    const pos = { last: 0, ev: null };
+    // SSE-скан с возможностью отмены (статус-бар → клик)
+    const b = await new Promise((resolve) => {
+      let handle = null;
+      try {
+        handle = GM_xmlhttpRequest({
+          url: CFG.chb.base + '/api/v1/probe/' + encodeURIComponent(j.id),
+          method: 'GET', timeout: CFG.chb.probeTimeoutMs,
+          headers: { accept: 'text/event-stream' },
+          onprogress: (e) => {
+            chbCollect(e.responseText, pos, (ev, d) => {
+              if (ev === 'started' && d.online_probes) CHB.online = d.online_probes;
+              else if (ev === 'result' && d.verdicts && !probes.some((p) => p.probe_id === d.probe_id)) {
+                probes.push(d); CHB.parts = probes.length;
+                onPart({ stat, agg: chbAgg(probes), parts: probes.length, online: CHB.online });
+              }
+            });
+          },
+          onload: (r) => {
+            chbCollect(r.responseText, pos, (ev, d) => {
+              if (ev === 'result' && d.verdicts && !probes.some((p) => p.probe_id === d.probe_id)) { probes.push(d); CHB.parts = probes.length; }
+              if (ev === 'started' && d.online_probes) CHB.online = d.online_probes;
+            });
+            resolve({ ok: true, r });
+          },
+          onerror: () => resolve({ ok: false, aborted: false }),
+          ontimeout: () => resolve({ ok: false, aborted: false, timeout: true }),
+          onabort: () => resolve({ ok: false, aborted: true }),
         });
-      },
-      onload: (r) => {
-        chbCollect(r.responseText, pos, (ev, d) => {
-          if (ev === 'result' && d.verdicts && !probes.some((p) => p.probe_id === d.probe_id)) { probes.push(d); CHB.parts = probes.length; }
-          if (ev === 'started' && d.online_probes) CHB.online = d.online_probes;
-        });
-      },
+      } catch (err) { resolve({ ok: false, aborted: false }); }
+      CHB.abort = () => { try { handle && handle.abort(); } catch {} };
     });
-    if (!b.ok && !probes.length) throw new Error('cheburcheck: скан не удался');
+    CHB.abort = null;
+    if (!b.ok && !probes.length && !CHB.cancelled) throw new Error(CHB.cancelled ? 'отменено' : 'cheburcheck: скан не удался');
     const agg = chbAgg(probes);
     if (agg.total) gmSet('__dsnf3_chbp_' + host, { t: Date.now(), c: agg.counts, n: agg.total, w: agg.winner });
     return { stat, agg, parts: probes.length };
@@ -701,7 +713,8 @@
     if (CHB.busy) return;
     const host = chbQueue.shift();
     if (!host || !hasGM) return;
-    CHB.busy = true; CHB.active = host; CHB.parts = 0; CHB.online = 0;
+    CHB.busy = true; CHB.active = host; CHB.parts = 0; CHB.online = 0; CHB.startedAt = Date.now(); CHB.cancelled = false;
+    const tick = setInterval(() => { if (CHB.busy) renderSoon(); else clearInterval(tick); }, 1000); // живой таймер в статус-баре
     const st = info.get(host) || {}; info.set(host, st);
     st.chbBusy = true; delete st.regErr; renderSoon();
     try {
@@ -724,10 +737,12 @@
         }
       }
     } catch (e) {
-      const c = gmGet('__dsnf3_chbp_' + host, null);
-      if (c && c.n) st.reg = { counts: c.c, total: c.n, winner: c.w, cached: true };
-      else st.regErr = String((e && e.message) || e || 'ошибка региональной проверки');
-      setTimeout(() => { delete st.regErr; renderSoon(); }, 10000);
+      if (!CHB.cancelled) { // при отмене не пугаем пользователя ошибкой
+        const c = gmGet('__dsnf3_chbp_' + host, null);
+        if (c && c.n) st.reg = { counts: c.c, total: c.n, winner: c.w, cached: true };
+        else st.regErr = String((e && e.message) || e || 'ошибка региональной проверки');
+        setTimeout(() => { delete st.regErr; renderSoon(); }, 10000);
+      }
     } finally {
       st.chbBusy = false; CHB.busy = false; CHB.active = ''; renderSoon();
       if (chbQueue.length) chbPump();
@@ -735,7 +750,7 @@
   };
 
   const chbTag = (st) => {
-    if (st.chbBusy) return 'Регион-чек: сканирую…' + (CHB.parts ? ' (' + CHB.parts + (CHB.online ? '/' + CHB.online : '') + ' сканеров)' : '');
+    if (st.chbBusy) return 'Регион-чек: сканирую… ' + Math.max(0, Math.round((Date.now() - CHB.startedAt) / 1000)) + 'с' + (CHB.parts ? ' · ' + CHB.parts + (CHB.online ? '/' + CHB.online : '') + ' сканеров' : '');
     if (st.regErr) return 'Регион-чек: ' + st.regErr;
     if (!st.reg || !st.reg.total) return '';
     const a = st.reg;
@@ -1089,7 +1104,7 @@
     const copyBtn = mkBtn('Список', 'Скопировать весь список доменов');
     const probBtn = mkBtn('Проблемные', 'Скопировать только заблокированные и «не в прокси» домены — готовый список для прокси-листа роутера');
     const checkBtn = mkBtn('Проверить', 'Проверить все собранные домены: реестр блокировок + IP-подсети + живые пробы у вашего провайдера (DPI / полная / ~16-20КБ / замедление)');
-    const chbBtn = mkBtn('Регионы', 'Проверить домен текущего сайта по регионам РФ (cheburcheck.ru): десятки сканеров покажут SNI-блок/ТСПУ/подмену DNS/CDN 16-20КБ по всем операторам (~1-2 мин, кэш 6 ч)');
+    const chbBtn = mkBtn('Регионы', 'Проверить домен текущего сайта по регионам РФ (cheburcheck.ru): ~1-2 мин на домен, сканируются по одному, кэш 6 ч. Shift+клик — поставить в очередь все видимые домены');
     const clearBtn = mkBtn('', 'Очистить собранный список', 'trash');
     const helpBtn = mkBtn('?', 'Справка: что означают статусы и кнопки');
     const themeBtn = mkBtn('', 'Тема (клик — переключить: система / тёмная / светлая)', 'theme');
@@ -1238,7 +1253,8 @@
     );
 
     const statusbar = document.createElement('div');
-    Object.assign(statusbar.style, { marginTop: '8px', fontSize: '10px', lineHeight: '1.5', color: 'var(--muted)' });
+    Object.assign(statusbar.style, { marginTop: '8px', fontSize: '10px', lineHeight: '1.5', color: 'var(--muted)', cursor: 'pointer' });
+    statusbar.title = 'Во время регион-чека: клик здесь — отменить текущий скан и очистить очередь';
 
     const routebar = document.createElement('div');
     Object.assign(routebar.style, { marginTop: '2px', fontSize: '10px', lineHeight: '1.5', color: 'var(--accent)' });
@@ -1422,7 +1438,7 @@
 
     const defaultStatus = () => {
       if (statusMsg) return statusMsg;
-      if (CHB.busy) return 'Регион-чек ' + CHB.active + ': ответов ' + CHB.parts + (CHB.online ? ' / ' + CHB.online + ' сканеров' : '') + (chbQueue.length ? ' · в очереди ' + chbQueue.length : '');
+      if (CHB.busy) return 'Регион-чек ' + CHB.active + ' — ' + Math.max(0, Math.round((Date.now() - CHB.startedAt) / 1000)) + 'с (до ~' + Math.round(CFG.chb.probeTimeoutMs / 1000) + 'с) · ответов ' + CHB.parts + (CHB.online ? '/' + CHB.online : '') + (chbQueue.length ? ' · в очереди ' + chbQueue.length : '') + ' · клик здесь — отменить';
       if (running) return 'Проверка: осталось ' + queue.length + '…';
       if (REG.loading) return 'Загрузка списков реестра…';
       if (REG.t) return 'Реестр: ' + REG.domCount.toLocaleString('ru-RU') + ' дом., ' + REG.netCount.toLocaleString('ru-RU') + ' подсетей · от ' + new Date(REG.t).toLocaleString('ru-RU');
@@ -1499,10 +1515,17 @@
       else flashStatus('Не удалось скопировать список');
     };
     checkBtn.onclick = () => { checkAll(); };
-    chbBtn.onclick = () => {
-      const h = String(location.hostname || '');
-      if (!h.includes('.')) { statusMsg = 'Регион-чек доступен только для доменов'; renderSoon(); setTimeout(() => { statusMsg = ''; renderSoon(); }, 6000); return; }
-      if (!chbQueue.includes(h)) chbQueue.push(h);
+    chbBtn.onclick = (e) => {
+      let hosts;
+      if (e.shiftKey) {
+        hosts = [...domains.keys()].filter((h) => { const rec = domains.get(h); return !linkOnly || (rec && rec.net); });
+        if (!hosts.length) { flashStatus('Нет доменов для регион-чека'); return; }
+      } else {
+        const h = String(location.hostname || '');
+        if (!h.includes('.')) { statusMsg = 'Регион-чек доступен только для доменов'; renderSoon(); setTimeout(() => { statusMsg = ''; renderSoon(); }, 6000); return; }
+        hosts = [h];
+      }
+      for (const h of hosts) if (!chbQueue.includes(h)) chbQueue.push(h);
       chbPump();
     };
 
