@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.4
+// @version      4.5
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -671,15 +671,19 @@
     if (!j.id) return { stat, agg: null };
     const probes = [];
     const pos = { last: 0, ev: null };
-    // SSE-скан с возможностью отмены (статус-бар → клик)
+    // SSE-скан: отмена через статус-бар + сторож тишины (60с без единого байта → обрыв, не ждём 180с)
+    let gotBytes = false;
     const b = await new Promise((resolve) => {
       let handle = null;
+      const done = (v) => { clearTimeout(watchdog); resolve(v); };
+      const watchdog = setTimeout(() => { if (!gotBytes) { try { handle && handle.abort(); } catch {} } }, 60000);
       try {
         handle = GM_xmlhttpRequest({
           url: CFG.chb.base + '/api/v1/probe/' + encodeURIComponent(j.id),
           method: 'GET', timeout: CFG.chb.probeTimeoutMs,
           headers: { accept: 'text/event-stream' },
           onprogress: (e) => {
+            if (e.responseText && e.responseText.length) { gotBytes = true; clearTimeout(watchdog); }
             chbCollect(e.responseText, pos, (ev, d) => {
               if (ev === 'started' && d.online_probes) CHB.online = d.online_probes;
               else if (ev === 'result' && d.verdicts && !probes.some((p) => p.probe_id === d.probe_id)) {
@@ -693,17 +697,17 @@
               if (ev === 'result' && d.verdicts && !probes.some((p) => p.probe_id === d.probe_id)) { probes.push(d); CHB.parts = probes.length; }
               if (ev === 'started' && d.online_probes) CHB.online = d.online_probes;
             });
-            resolve({ ok: true, r });
+            done({ ok: true, r });
           },
-          onerror: () => resolve({ ok: false, aborted: false }),
-          ontimeout: () => resolve({ ok: false, aborted: false, timeout: true }),
-          onabort: () => resolve({ ok: false, aborted: true }),
+          onerror: () => done({ ok: false, aborted: false }),
+          ontimeout: () => done({ ok: false, aborted: false, timeout: true }),
+          onabort: () => done({ ok: false, aborted: true }),
         });
-      } catch (err) { resolve({ ok: false, aborted: false }); }
+      } catch (err) { done({ ok: false, aborted: false }); }
       CHB.abort = () => { try { handle && handle.abort(); } catch {} };
     });
     CHB.abort = null;
-    if (!b.ok && !probes.length && !CHB.cancelled) throw new Error(CHB.cancelled ? 'отменено' : 'cheburcheck: скан не удался');
+    if (!b.ok && !probes.length && !CHB.cancelled) throw new Error(gotBytes ? 'cheburcheck: скан не удался' : 'cheburcheck: поток скана молчит (сервис перегружен?)');
     const agg = chbAgg(probes);
     if (agg.total) gmSet('__dsnf3_chbp_' + host, { t: Date.now(), c: agg.counts, n: agg.total, w: agg.winner });
     return { stat, agg, parts: probes.length };
@@ -724,16 +728,34 @@
         const cs = gmGet('__dsnf3_chbs_' + host, null);
         if (cs && cs.d) st.regStatic = cs.d;
       } else {
-        const res = await chbScan(host, ({ stat, agg }) => {
-          st.regStatic = stat;
-          if (agg && agg.total) { st.reg = agg; renderSoon(); }
-        });
-        st.regStatic = res.stat;
-        if (res.agg && res.agg.total) st.reg = res.agg;
-        else {
+        let res = null, failMsg = '';
+        for (let attempt = 1; attempt <= 2 && !CHB.cancelled; attempt++) {
+          try {
+            res = await chbScan(host, ({ stat, agg }) => {
+              st.regStatic = stat;
+              if (agg && agg.total) { st.reg = agg; renderSoon(); }
+            });
+            if (res.agg && res.agg.total) break;
+            failMsg = 'сканеры не ответили';
+          } catch (err) {
+            if (CHB.cancelled) break;
+            failMsg = String((err && err.message) || err || 'ошибка скана');
+          }
+          if (attempt < 2) { st.regErr = failMsg + ' — пробую ещё раз…'; renderSoon(); }
+        }
+        st.regStatic = res && res.stat ? res.stat : st.regStatic;
+        if (res && res.agg && res.agg.total) {
+          st.reg = res.agg;
+        } else if (!CHB.cancelled) {
           const old = gmGet('__dsnf3_chbp_' + host, null);
-          if (old && old.n) st.reg = { counts: old.c, total: old.n, winner: old.w, cached: true };
-          else st.regErr = 'сканеры не ответили';
+          if (old && old.n) {
+            st.reg = { counts: old.c, total: old.n, winner: old.w, cached: true };
+          } else {
+            st.regErr = failMsg;
+            statusMsg = 'Регион-чек ' + host + ': ' + failMsg + ' — сервис перегружен, попробуйте позже'; renderSoon();
+            setTimeout(() => { if (statusMsg.indexOf('Регион-чек') === 0) { statusMsg = ''; renderSoon(); } }, 12000);
+            setTimeout(() => { delete st.regErr; renderSoon(); }, 12000);
+          }
         }
       }
     } catch (e) {
