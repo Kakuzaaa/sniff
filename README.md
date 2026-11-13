@@ -7,12 +7,19 @@ Userscript для **Tampermonkey / Violentmonkey**: собирает все до
 ## 📦 Установка
 
 1. Установите расширение [Tampermonkey](https://www.tampermonkey.net/) (Chrome/Edge/Firefox) или [Violentmonkey](https://violentmonkey.github.io/).
-2. Откройте ссылку на скрипт — менеджер предложит установить:
-   **[domain-sniffer-pro.user.js](https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js)**
+2. Откройте ссылку на скрипт (CDN jsDelivr — доступнее в РФ, чем GitHub raw) — менеджер предложит установить:
+   **[Установить Domain Sniffer Pro](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js)**
 3. При установке подтвердите запрос доступа ко всем сайтам (он нужен для перехвата запросов сайта и живых проверок блокировок).
-4. Обновления приходят автоматически — скрипт тянется с этого репозитория.
+4. Обновления приходят автоматически — скрипт тянется с CDN этого репозитория.
 
-> Если ссылка не сработала: скопируйте файл вручную → Tampermonkey → «Создать новый скрипт» → вставить → сохранить.
+### Если установка не сработала
+
+Открылась страница Tampermonkey «Script installation», а диалог установки не появился? Так бывает, когда расширение не смогло скачать файл (raw.githubusercontent.com в РФ часто режется провайдером, а VPN-расширение в браузере может не покрывать запросы самого Tampermonkey). Способы обойти:
+
+1. **Ручная установка (всегда работает):** откройте [файл скрипта](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js) → выделите всё (`Ctrl+A`) → скопируйте (`Ctrl+C`) → иконка Tampermonkey → «Юзерскрипты» → вкладка «+» → вставить (`Ctrl+V`) → `Ctrl+S` (Файл → Сохранить).
+2. **Импорт по ссылке:** иконка Tampermonkey → «Утилиты» → «Импорт из URL» → вставьте `https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js` → «Установить».
+3. **Классическая ссылка GitHub:** [raw.githubusercontent.com/…/domain-sniffer-pro.user.js](https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js) — сработает, если GitHub raw у вас не заблокирован.
+4. Если Tampermonkey показывает бесконечную промежуточную страницу: в настройках Tampermonkey включите режим конфигурации «Дополнительно» и включите «Мгновенная установка» (Instant installation) — промежуточная страница перестанет открываться, диалог будет появляться сразу.
 
 ## ✨ Возможности
 

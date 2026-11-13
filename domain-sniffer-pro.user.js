@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      3.6
+// @version      3.7
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -13,8 +13,8 @@
 // @connect      *
 // @homepageURL  https://github.com/Kakuzaaa/sniff
 // @supportURL   https://github.com/Kakuzaaa/sniff/issues
-// @updateURL    https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js
-// @downloadURL  https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js
+// @updateURL    https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js
+// @downloadURL  https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@main/domain-sniffer-pro.user.js
 // ==/UserScript==
 
 /*
