@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      3.8
+// @version      3.9
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -150,9 +150,10 @@
   };
 
   // ────────────────────────────── СОСТОЯНИЕ ──────────────────────────────
-  const domains = new Map(); // host → true
-  const info = new Map();    // host → { status:{icons,tag,blocked}, busy }
+  const domains = new Map(); // host → { net: реально загружался, dom: был ссылкой в DOM }
+  const info = new Map();    // host → { status:{primary,tag,blocked}, busy }
   let rootOnly = false;
+  let linkOnly = false;      // «Только трафик»: скрыть домены-ссылки
   let statusMsg = '';
 
   // отложенный рендер (без UI во фреймах — просто no-op)
@@ -177,30 +178,32 @@
   const flushSend = () => { if (!pendingSend.size) return; const hosts = [...pendingSend]; pendingSend.clear(); try { window.top.postMessage({ __dsnf3: hosts }, '*'); } catch {} };
   const scheduleSend = () => { if (sendTimer) return; sendTimer = setTimeout(() => { sendTimer = 0; flushSend(); }, 700); };
 
-  const addHost = (rawHost) => {
+  const addHost = (rawHost, src) => {
+    src = src === 'dom' ? 'dom' : 'net'; // по умолчанию считаем трафиком
     const host = String(rawHost || '').toLowerCase().trim().replace(/\.$/, '');
     if (!host || host === 'localhost') return false;
     if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return false;          // IPv4 — не домен
     if (host.includes(':') || host.includes('[')) return false;      // IPv6
     if (!/^[a-z0-9._-]+$/.test(host)) return false;                  // посторонние символы
     if (!host.includes('.')) return false;                           // односоставные имена (интранет)
-    if (domains.has(host)) return false;
-    domains.set(host, true);
+    const rec = domains.get(host);
+    if (rec) { rec[src] = true; return false; }                      // источник дополняем даже у знакомых
+    domains.set(host, { net: src === 'net', dom: src === 'dom' });
     if (!isTop) { pendingSend.add(host); scheduleSend(); }
     scheduleSave(); renderSoon();
     return true;
   };
 
-  const addUrl = (raw) => {
+  const addUrl = (raw, src) => {
     if (!raw || typeof raw !== 'string') return;
     const s = raw.trim();
     try {
       const u = new URL(s, baseHref());
-      if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'ws:' || u.protocol === 'wss:') { addHost(u.hostname); return; }
+      if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'ws:' || u.protocol === 'wss:') { addHost(u.hostname, src); return; }
       // stun:/turn: пишутся без «//», URL их не парсит — вытаскиваем вручную
       if (/^(stun|stuns|turn|turns):/i.test(u.protocol)) {
         const m = /^[a-z]+:(?:\/\/)?([^/:?]+)/i.exec(s);
-        if (m) addHost(m[1]);
+        if (m) addHost(m[1], src);
       }
     } catch {}
   };
@@ -281,7 +284,7 @@
   const cssTextUrls = (txt) => {
     if (!txt) return;
     URL_RE.lastIndex = 0;
-    let m; while ((m = URL_RE.exec(txt))) { try { addUrl(m[1]); } catch {} }
+    let m; while ((m = URL_RE.exec(txt))) { try { addUrl(m[1], 'dom'); } catch {} }
   };
 
   const ATTRS = ['src', 'href', 'data-src', 'data-href', 'poster', 'action', 'formaction', 'data', 'background'];
@@ -289,8 +292,8 @@
   const scanEl = (el) => {
     try {
       const g = (a) => { const v = el.getAttribute && el.getAttribute(a); return v || ''; };
-      for (const a of ATTRS) { const v = g(a); if (v) addUrl(v); }
-      const ss = g('srcset'); if (ss) ss.split(',').forEach((p) => addUrl(p.trim().split(/\s+/)[0]));
+      for (const a of ATTRS) { const v = g(a); if (v) addUrl(v, 'dom'); }
+      const ss = g('srcset'); if (ss) ss.split(',').forEach((p) => addUrl(p.trim().split(/\s+/)[0], 'dom'));
       const st = g('style'); if (st) cssTextUrls(st);
       if (el.tagName === 'STYLE' && el.textContent) cssTextUrls(el.textContent);
     } catch {}
@@ -346,7 +349,7 @@
       const raw = sessionStorage.getItem(SKEY);
       if (!raw) return;
       const d = JSON.parse(raw);
-      (d.hosts || []).forEach(addHost);
+      (d.hosts || []).forEach((h) => addHost(h, 'dom')); // источник уточнится реальным трафиком при загрузке
       const st = d.st || {};
       for (const h of Object.keys(st)) {
         const r = st[h].r, c = st[h].c, s = st[h].s;
@@ -885,8 +888,9 @@
 
   // ────────────────── СПИСОК ДЛЯ КОПИРОВАНИЯ ──────────────────
   const getListText = () => {
-    const arr = rootOnly ? [...new Set([...domains.keys()].map(getRoot))] : [...domains.keys()];
-    return arr.sort((a, b) => getRoot(a).localeCompare(getRoot(b)) || a.localeCompare(b)).join('\n');
+    const arr = [...domains.keys()].filter((h) => { const rec = domains.get(h); return !linkOnly || (rec && rec.net); });
+    const list = rootOnly ? [...new Set(arr.map(getRoot))] : arr;
+    return list.sort((a, b) => getRoot(a).localeCompare(getRoot(b)) || a.localeCompare(b)).join('\n');
   };
 
   // ────────────────── UI (только в верхнем фрейме) ──────────────────
@@ -1077,6 +1081,11 @@
     const chipAll = mkChip('all');
     const chipBad = mkChip('bad');
     const chipOk = mkChip('ok');
+    // «Только трафик»: скрыть домены-ссылки (например, результаты поиска или футеры) —
+    // показать лишь то, что страница реально загружала
+    const chipNet = mkChip('net');
+    chipNet.onclick = () => { linkOnly = !linkOnly; render(); };
+    chipNet.title = 'Показать только домены, которые страница реально загружала (скрыть домены-ссылки: результаты поиска, футеры, упоминания)';
 
     // вся документация — внутри панели по кнопке «?»
     const help = document.createElement('div');
@@ -1107,6 +1116,7 @@
       hLine('Иконка глобуса на строке — регион-чек этого домена по РФ'),
       hLine('клик по имени домена или иконке копирования — скопировать этот домен'),
       hLine('клик по остальной строке — перепроверить один домен · число справа — задержка в мс'),
+      hLine('Чип «Только трафик» — скрыть домены-ссылки (страница их не загружала, они просто стоят ссылками: результаты поиска, футеры, README). Приглушённые строки — это домены-ссылки.'),
       hLine('Шапку можно тащить мышью — позиция запоминается.'),
       hLine('Список доменов и статусы сохраняются при переходах по сайту (до закрытия вкладки).'),
     );
@@ -1165,8 +1175,9 @@
       const host = document.createElement('span');
       host.textContent = r.host;
       Object.assign(host.style, { flex: '1 1 auto', minWidth: '0', overflowWrap: 'anywhere', color: mood === 'bad' ? 'var(--bad)' : 'var(--txt)' });
+      if (r.linkOnly) host.style.opacity = '.6';
       host.style.cursor = 'pointer';
-      host.title = 'Нажмите, чтобы скопировать домен';
+      host.title = 'Нажмите, чтобы скопировать домен' + (r.linkOnly ? ' · домен-ссылка: страница его не загружала, он просто стоит ссылкой' : '');
       host.onclick = (ev) => {
         ev.stopPropagation(); // не запускаем перепроверку строки
         copyText(r.host).then((okk) => flashStatus(okk ? 'Скопировано: ' + r.host : 'Не удалось скопировать'));
@@ -1212,6 +1223,8 @@
       const out = [];
       if (!rootOnly) {
         for (const h of domains.keys()) {
+          const rec = domains.get(h) || {};
+          if (linkOnly && !rec.net) continue; // «Только трафик»: скрыть домены-ссылки
           const s = info.get(h) || {};
           const parts = [];
           let danger = !!(s.status && s.status.blocked && s.route && s.route.direct);
@@ -1233,6 +1246,7 @@
             danger,
             st: (blocked || danger) ? 'bad' : (s.status && !s.status.blocked ? 'ok' : 'none'),
             ms: s.ms || null,
+            linkOnly: !rec.net,
             busy: !!s.busy,
             click: hasGM ? h : null,
           });
@@ -1240,6 +1254,8 @@
       } else {
         const map = new Map();
         for (const h of domains.keys()) {
+          const rec = domains.get(h) || {};
+          if (linkOnly && !rec.net) continue;
           const r = getRoot(h);
           let e = map.get(r);
           if (!e) { e = { host: r, subs: 0, blocked: 0, checked: 0, prox: 0, direct: 0 }; map.set(r, e); }
@@ -1294,16 +1310,19 @@
       chipAll.textContent = 'Все · ' + all.length;
       chipBad.textContent = 'Проблемные · ' + badN;
       chipOk.textContent = 'Доступные · ' + okN;
+      chipNet.textContent = 'Только трафик' + (linkOnly ? ' ✓' : '');
       for (const [c, k] of [[chipAll, 'all'], [chipBad, 'bad'], [chipOk, 'ok']]) {
         c.style.background = viewFilter === k ? 'var(--accent)' : 'var(--chip)';
         c.style.color = viewFilter === k ? '#fff' : 'var(--txt)';
         c.style.borderColor = 'transparent';
       }
+      chipNet.style.background = linkOnly ? 'var(--accent)' : 'var(--chip)';
+      chipNet.style.color = linkOnly ? '#fff' : 'var(--txt)';
       help.style.display = showHelp ? 'block' : 'none';
       list.style.display = showHelp ? 'none' : 'block';
       helpBtn.style.background = showHelp ? 'var(--accent)' : 'var(--btn)';
       helpBtn.style.color = showHelp ? '#fff' : 'var(--txt)';
-      const sig = JSON.stringify([rootOnly, statusMsg, running, queue.length, REG.t, REG.err, viewFilter, showHelp, all.length, badN, okN, rows.map((r) => [r.host, r.badge && r.badge.t, r.tag, r.blocked, r.busy])]);
+      const sig = JSON.stringify([rootOnly, statusMsg, running, queue.length, REG.t, REG.err, viewFilter, showHelp, linkOnly, all.length, badN, okN, rows.map((r) => [r.host, r.badge && r.badge.t, r.tag, r.blocked, r.busy])]);
       if (sig !== lastSig) {
         lastSig = sig;
         list.textContent = '';
