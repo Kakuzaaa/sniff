@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.8
+// @version      4.9
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -122,6 +122,8 @@
       probeTtlMs: 6 * 60 * 60 * 1000, // кэш живого скана на домен
       probeTimeoutMs: 180000,         // SSE-скан идёт ~60-90с
     },
+    sanity: { hosts: ['ya.ru', 'vk.com', 'sberbank.com'], ttl: 10 * 60 * 1000 }, // контрольные точки достоверности
+    post16TimeoutMs: 10000, // POST 64КБ: таймаут = TSPU обрезает исходящий поток
   };
 
   const SKEY = '__dsnf3_set';   // собранные домены + статусы (sessionStorage)
@@ -155,6 +157,7 @@
   let rootOnly = false;
   let linkOnly = (() => { try { return gmGet('__dsnf3_linkonly', true) !== false; } catch { return true; } })(); // по умолчанию «Только трафик»
   let statusMsg = '';
+  const SANITY = { t: 0, ok: [], fail: [] }; // контрольные точки последней «Проверить»
 
   // пользовательский игнор-лист (маски с *) и режим сбора ссылок со страницы
   const parseIgnore = (txt) => String(txt || '').split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#'));
@@ -788,6 +791,37 @@
     return s;
   };
 
+  // ────────────────── ПОДТВЕРЖДЕНИЕ TSPU 16-20 ИСХОДЯЩИМ POST (методика hyperion-cs/dpi-checkers) ──────────────────
+  // ТСПУ считает байты соединения в ОБЕ стороны: живой хост + POST 64КБ, который
+  // обрезается по таймауту без ответа = детерминированный вердикт «заморозки»,
+  // не зависящий от размера страницы сайта.
+  let POST_BODY = null;
+  const getPostBody = () => {
+    if (!POST_BODY) {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let s = '';
+      for (let i = 0; i < 68 * 1024; i++) s += chars[(Math.random() * chars.length) | 0];
+      POST_BODY = s;
+    }
+    return POST_BODY;
+  };
+  const probePost16 = (url) => new Promise((res) => {
+    let t0 = performance.now(), done = false;
+    const finish = (o) => { if (done) return; done = true; res(Object.assign({ ms: performance.now() - t0 }, o)); };
+    try {
+      GM_xmlhttpRequest({
+        url: url + (url.includes('?') ? '&' : '?') + '_dpich=' + Math.floor(Math.random() * 1e9),
+        method: 'POST', timeout: CFG.post16TimeoutMs, anonymous: true,
+        headers: { 'Content-Type': 'text/plain' },
+        data: getPostBody(),
+        onload: (r) => finish({ kind: 'ok', status: r.status }),
+        onerror: () => finish({ kind: 'err' }),
+        ontimeout: () => finish({ kind: 'timeout' }),
+        onabort: () => finish({ kind: 'abort' }),
+      });
+    } catch (e) { finish({ kind: 'err' }); }
+  });
+
   // ────────────────── DNS-OVER-HTTPS (узнать IP домена) ──────────────────
   const dohQuery = async (host) => {
     for (const base of CFG.doh) {
@@ -907,6 +941,15 @@
       if (p1 && p1.kind !== 'ok' && p1.kind !== 'abort') p2 = await probeUrl('http://' + host + '/');
       st.status = classify(p1, p2, regDom, regIp, ips);
       if (p1) st.ms = Math.round(p1.ms);
+      // подтверждение TSPU 16-20 исходящим POST 64КБ (только для живых доменов)
+      if (p1 && (p1.kind === 'ok' || p1.kind === 'abort')) {
+        const post = await probePost16('https://' + host + '/');
+        if (post.kind === 'timeout' || post.kind === 'abort') {
+          st.status.primary = 'partial';
+          st.status.blocked = true;
+          st.status.tag += ' · TSPU 16-20 подтверждён: POST 64КБ обрезается на живом хосте';
+        }
+      }
       // маршрут точно: наша проба сама создала соединение на роутере — читаем /connections
       if (ROUTE.ok) {
         await new Promise((r) => setTimeout(r, CFG.route.probeDelayMs));
@@ -954,6 +997,25 @@
       statusMsg = '⏳ Загружаю списки реестра (первый раз ~10-20 МБ, кэш 12 ч)…'; renderSoon();
       await loadLists(false);
       statusMsg = ''; renderSoon();
+    }
+    // контрольные точки: известные незаблокированные RU-сервисы (методика MayersScott/rkn-block-checker) —
+    // если они не отвечают, значит сломана сеть/VPN, и все результаты проверки недостоверны
+    const now = Date.now();
+    if (!SANITY.t || now - SANITY.t > CFG.sanity.ttl) {
+      statusMsg = 'Контрольные точки: проверяю ' + CFG.sanity.hosts.join(', ') + '…'; renderSoon();
+      const res = await Promise.all(CFG.sanity.hosts.map(async (h) => {
+        const p = await probeUrl('https://' + h + '/');
+        return { h, ok: p.kind === 'ok' || p.kind === 'abort' };
+      }));
+      SANITY.t = now;
+      SANITY.ok = res.filter((r) => r.ok).map((r) => r.h);
+      SANITY.fail = res.filter((r) => !r.ok).map((r) => r.h);
+      statusMsg = ''; renderSoon();
+    }
+    if (SANITY.fail && SANITY.fail.length) {
+      statusMsg = 'Контрольные точки недоступны (' + SANITY.fail.join(', ') + ') — проверка всё равно пройдёт, но результаты могут быть недостоверны';
+      renderSoon();
+      setTimeout(() => { if (statusMsg.indexOf('Контрольные точки') === 0) { statusMsg = ''; renderSoon(); } }, 15000);
     }
     const list = [...domains.keys()].filter((h) => { const s = info.get(h); return !(s && s.status); });
     for (const h of list) if (!queue.includes(h)) queue.push(h);
@@ -1336,6 +1398,7 @@
       hLine('● обрыв — соединение оборвалось после большого объёма'),
       hLine('● медленно — похоже на замедление (троттлинг)'),
       hLine('В подробностях под строкой: «домен в реестре блокировок», «IP-подсеть в реестре» (хостинг типа Hetzner/Cloudflare).'),
+      hLine('HTTP 403/405 у некоторых сайтов — это анти-бот проверка, а не блокировка (так отвечают даже там, где не заблокированы).'),
       hSec('Маршрут (нужен Clash API — шестерёнка)'),
       hLine('«через прокси» — домен идёт через VPN/прокси (показана цепочка) · «напрямую» — идёт в обход (и по какому правилу)'),
       hLine('со знаком «?» — определено косвенно, без Clash API (по реестру и задержкам)'),
@@ -1540,6 +1603,7 @@
       if (CHB.busy) return 'Регион-чек ' + CHB.active + ' — ' + Math.max(0, Math.round((Date.now() - CHB.startedAt) / 1000)) + 'с (до ~' + Math.round(CFG.chb.probeTimeoutMs / 1000) + 'с) · ответов ' + CHB.parts + (CHB.online ? '/' + CHB.online : '') + (chbQueue.length ? ' · в очереди ' + chbQueue.length : '') + ' · клик здесь — отменить';
       if (running) return 'Проверка: осталось ' + queue.length + '…';
       if (REG.loading) return 'Загрузка списков реестра…';
+      if (SANITY.t && SANITY.fail && SANITY.fail.length) return 'Контрольные точки недоступны (' + SANITY.fail.join(', ') + ') — результаты могут быть недостоверны';
       if (REG.t) return 'Реестр: ' + REG.domCount.toLocaleString('ru-RU') + ' дом., ' + REG.netCount.toLocaleString('ru-RU') + ' подсетей · от ' + new Date(REG.t).toLocaleString('ru-RU');
       if (REG.err) return REG.err + ' — проверка только живыми пробами';
       if (!hasGM) return 'GM_xmlhttpRequest недоступен — проверка блокировок не работает';
