@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.9
+// @version      4.10
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -124,6 +124,13 @@
     },
     sanity: { hosts: ['ya.ru', 'vk.com', 'sberbank.com'], ttl: 10 * 60 * 1000 }, // контрольные точки достоверности
     post16TimeoutMs: 10000, // POST 64КБ: таймаут = TSPU обрезает исходящий поток
+    tspu: { timeoutMs: 10000, hosts: [ // тестовые хосты на подсетях крупных провайдеров (из suite.json hyperion-cs)
+      { p: 'Cloudflare', h: 'img.wzstats.gg' },
+      { p: 'DigitalOcean', h: 'carishealthcare.com' },
+      { p: 'Fastly', h: 'ssl.p.jwpcdn.com' },
+      { p: 'AWS', h: 'www.getscope.com' },
+      { p: 'Contabo', h: 'www.cateringexner.cz' },
+    ] },
   };
 
   const SKEY = '__dsnf3_set';   // собранные домены + статусы (sessionStorage)
@@ -822,6 +829,32 @@
     } catch (e) { finish({ kind: 'err' }); }
   });
 
+  // ────────────────── TSPU-ТЕСТ ПРОВАЙДЕРА (по suite.json hyperion-cs/dpi-checkers) ──────────────────
+  const TSPU = { busy: false };
+  const runTspuTest = async () => {
+    if (!hasGM || TSPU.busy) return;
+    TSPU.busy = true;
+    statusMsg = 'TSPU-тест: POST 64КБ на ' + CFG.tspu.hosts.length + ' подсетей…'; renderSoon();
+    const res = await Promise.all(CFG.tspu.hosts.map(async ({ p, h }) => {
+      const alive = await probeUrl('https://' + h + '/', 'HEAD');
+      if (alive.kind !== 'ok' && alive.kind !== 'abort') return { p, st: 'dead' };
+      const post = await probePost16('https://' + h + '/');
+      return { p, st: (post.kind === 'timeout' || post.kind === 'abort') ? 'cut' : 'ok' };
+    }));
+    const cut = res.filter((r) => r.st === 'cut').map((r) => r.p);
+    const aliveN = res.filter((r) => r.st !== 'dead').length;
+    TSPU.busy = false;
+    statusMsg = aliveN === 0
+      ? 'TSPU-тест: все тестовые хосты недоступны — проверьте сеть'
+      : cut.length >= 2
+        ? 'TSPU 16-20: ПОДТВЕРЖДЁН на ' + cut.length + '/' + aliveN + ' подсетях (' + cut.join(', ') + ') — провайдер режет исходящий поток'
+        : cut.length === 1
+          ? 'TSPU 16-20: единичное срабатывание (' + cut[0] + ') — похоже, провайдер режет'
+          : 'TSPU 16-20: не обнаружен на ' + aliveN + ' подсетях — исходящий поток не режется';
+    renderSoon();
+    setTimeout(() => { if (statusMsg.indexOf('TSPU') === 0) { statusMsg = ''; renderSoon(); } }, 20000);
+  };
+
   // ────────────────── DNS-OVER-HTTPS (узнать IP домена) ──────────────────
   const dohQuery = async (host) => {
     for (const base of CFG.doh) {
@@ -841,7 +874,7 @@
   //   sustained — устойчивая скорость (Б/с) ПОСЛЕ первых slowSkipBytes, окно ≥0.5с;
   //   TTFB и «сервер думает» в скорость не попадают. null = не измерить (мало данных).
   //   silentMs — сколько миллисекунд до конца не было ни одного байта (детект «встало»).
-  const probeUrl = (url) => new Promise((res) => {
+  const probeUrl = (url, method) => new Promise((res) => {
     let loaded = 0, t0 = 0, done = false, ctrl = null;
     let anchorB = -1, anchorT = 0, lastBumpT = 0;
     t0 = performance.now(); lastBumpT = t0;
@@ -856,7 +889,7 @@
     };
     try {
       ctrl = GM_xmlhttpRequest({
-        url, method: 'GET', timeout: CFG.probeTimeoutMs, anonymous: true,
+        url, method: method || 'GET', timeout: CFG.probeTimeoutMs, anonymous: true,
         onprogress: (e) => {
           if (e.loaded > loaded) {
             loaded = e.loaded; lastBumpT = performance.now();
@@ -864,7 +897,7 @@
             if (loaded >= CFG.probeMaxBody && ctrl) { try { ctrl.abort(); } catch {} }
           }
         },
-        onload: (r) => finish({ kind: 'ok', status: r.status }),
+        onload: (r) => finish({ kind: 'ok', status: r.status, resp: (r.responseText || '').slice(0, 4000) }),
         onerror: (e) => finish({ kind: 'err', err: String((e && e.error) || '') }),
         ontimeout: () => finish({ kind: 'timeout' }),
         onabort: () => finish({ kind: 'abort' }),
@@ -878,6 +911,7 @@
     dpi:     { t: 'DPI',     c: '#f85149' },
     ip:      { t: 'IP',      c: '#f85149' },
     partial: { t: '16-20КБ', c: '#d29922' },
+    stub:    { t: 'стаб-страница', c: '#d29922' },
     tear:    { t: 'обрыв',   c: '#d29922' },
     slow:    { t: 'медленно', c: '#d29922' },
     reg:     { t: 'в реестре', c: '#a371f7' },
@@ -941,6 +975,13 @@
       if (p1 && p1.kind !== 'ok' && p1.kind !== 'abort') p2 = await probeUrl('http://' + host + '/');
       st.status = classify(p1, p2, regDom, regIp, ips);
       if (p1) st.ms = Math.round(p1.ms);
+      // заглушка провайдера: маленький 200-ответ с маркерами блокировки (rkn-block-checker)
+      if (p1 && p1.kind === 'ok' && p1.status === 200 && p1.resp && p1.resp.length < 15000 &&
+          /ограничен доступ|заблокирова|запрещ[её]н|роскомнадзор|roskomnadzor|access (denied|restricted)|blocked by/i.test(p1.resp.slice(0, 3000))) {
+        st.status.primary = 'stub';
+        st.status.blocked = true;
+        st.status.tag += ' · провайдер отдаёт заглушку вместо сайта';
+      }
       // подтверждение TSPU 16-20 исходящим POST 64КБ (только для живых доменов)
       if (p1 && (p1.kind === 'ok' || p1.kind === 'abort')) {
         const post = await probePost16('https://' + host + '/');
@@ -948,6 +989,19 @@
           st.status.primary = 'partial';
           st.status.blocked = true;
           st.status.tag += ' · TSPU 16-20 подтверждён: POST 64КБ обрезается на живом хосте';
+        } else if (post.kind === 'err') {
+          // метод 2 hyperion: серия HEAD с ~7КБ в request line — накопление байтов аплинка
+          const t02 = performance.now();
+          let cut = false;
+          while (performance.now() - t02 < 12000) {
+            const rr = await probeUrl('https://' + host + '/?x=' + getPostBody().slice(0, 7 * 1024) + '&n=' + Math.floor(Math.random() * 1e9), 'HEAD');
+            if (rr.kind !== 'ok') { cut = true; break; }
+          }
+          if (cut) {
+            st.status.primary = 'partial';
+            st.status.blocked = true;
+            st.status.tag += ' · TSPU 16-20: вероятно (request-line)';
+          }
         }
       }
       // маршрут точно: наша проба сама создала соединение на роутере — читаем /connections
@@ -1209,6 +1263,7 @@
     const probBtn = mkBtn('Проблемные', 'Скопировать только заблокированные и «не в прокси» домены — готовый список для прокси-листа роутера');
     const checkBtn = mkBtn('Проверить', 'Проверить все собранные домены: реестр блокировок + IP-подсети + живые пробы у вашего провайдера (DPI / полная / ~16-20КБ / замедление)');
     const chbBtn = mkBtn('Регионы', 'Проверить домен текущего сайта по регионам РФ (cheburcheck.ru): ~1-2 мин на домен, сканируются по одному, кэш 6 ч. Shift+клик — поставить в очередь все видимые домены');
+    const tspuBtn = mkBtn('TSPU-тест', 'Тест: режет ли ваш провайдер исходящий поток 16-20КБ — POST 64КБ на 5 крупных подсетях (~15с)');
     const clearBtn = mkBtn('', 'Очистить собранный список', 'trash');
     const helpBtn = mkBtn('?', 'Справка: что означают статусы и кнопки');
     const themeBtn = mkBtn('', 'Тема (клик — переключить: система / тёмная / светлая)', 'theme');
@@ -1719,8 +1774,10 @@
       copyText(text).then((okk) => flashStatus(okk ? 'Скопировано проблемных: ' + rows.length : 'Не удалось скопировать'));
     };
 
+    tspuBtn.onclick = () => runTspuTest();
+
     btnGroup.append(reloadBtn, gearBtn, helpBtn, themeBtn, clearBtn, minBtn);
-    actionRow.append(checkBtn, chbBtn, copyBtn, probBtn, modeBtn);
+    actionRow.append(checkBtn, chbBtn, tspuBtn, copyBtn, probBtn, modeBtn);
     box.append(header, actionRow, filters, searchIn, list, help, statusbar, routebar, settings);
     document.documentElement.append(pill, box);
     // анимация пульсации точки «проверка» + восстановление сохранённой позиции панели
