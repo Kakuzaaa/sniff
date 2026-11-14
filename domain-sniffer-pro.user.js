@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.15
+// @version      4.16
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -498,16 +498,24 @@
 
   const routeHeaders = () => (ROUTE.secret ? { Authorization: 'Bearer ' + ROUTE.secret } : {});
   const tryRouteUrl = async (url) => {
-    url = String(url || '').replace(/\/+$/, '');
-    if (!/^https?:\/\/.+/.test(url)) return false;
+    url = String(url || '').trim().replace(/\/+$/, '');
+    const candidates = [url];
+    // пользователь часто вставляет адрес дашборда с суффиксом /ui — пробуем и корень
     try {
-      const a = await gmReq({ url: url + '/version', method: 'GET', timeout: 2500, headers: routeHeaders() });
-      if (a.ok && a.r.responseText && a.r.responseText.indexOf('version') !== -1) {
-        ROUTE.base = url; ROUTE.ok = true;
-        try { ROUTE.ver = JSON.parse(a.r.responseText).version || ''; } catch {}
-        return true;
-      }
+      const u = new URL(url);
+      if (u.pathname && u.pathname !== '/' && !candidates.includes(u.origin)) candidates.push(u.origin);
     } catch {}
+    for (const c of candidates) {
+      if (!/^https?:\/\/.+/.test(c)) continue;
+      try {
+        const a = await gmReq({ url: c + '/version', method: 'GET', timeout: 2500, headers: routeHeaders() });
+        if (a.ok && a.r.responseText && a.r.responseText.indexOf('version') !== -1) {
+          ROUTE.base = c; ROUTE.ok = true;
+          try { ROUTE.ver = JSON.parse(a.r.responseText).version || ''; } catch {}
+          return true;
+        }
+      } catch {}
+    }
     return false;
   };
   const connectRoute = async (url, secret, save) => {
