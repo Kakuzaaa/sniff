@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.6
+// @version      4.7
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -1148,6 +1148,23 @@
     const gearBtn = mkBtn('', 'Маршрут через прокси: подключение к Clash API роутера/ПК (Podkop/Forkop/NetShift/sing-box/clash)', 'gear');
     applyTheme();
 
+    // настройки интерфейса: автоскрытие в fullscreen, прозрачность в покое, хоткей
+    const UI_CFG = (() => { try { return Object.assign({ fsHide: true, pillOp: 100, panelOp: 100 }, gmGet('__dsnf3_ui', {}) || {}); } catch { return { fsHide: true, pillOp: 100, panelOp: 100 }; } })();
+    let uiHidden = false; // полное скрытие по Alt+Shift+D
+    const saveUi = () => { try { gmSet('__dsnf3_ui', UI_CFG); } catch {} };
+    const applyUiCfg = () => {
+      pill.style.opacity = String(UI_CFG.pillOp / 100);
+      box.style.opacity = String(UI_CFG.panelOp / 100);
+      pill.style.transition = 'opacity .15s ease';
+      pill.onmouseenter = () => { pill.style.opacity = '1'; };
+      pill.onmouseleave = () => { pill.style.opacity = String(UI_CFG.pillOp / 100); };
+      if (UI_CFG.panelOp < 100) {
+        box.style.transition = 'opacity .15s ease';
+        box.onmouseenter = () => { box.style.opacity = '1'; };
+        box.onmouseleave = () => { box.style.opacity = String(UI_CFG.panelOp / 100); };
+      }
+    };
+
     // строка действий (текстовые кнопки) — под шапкой, чтобы ничего не ломалось на узких экранах
     const actionRow = document.createElement('div');
     Object.assign(actionRow.style, { display: 'flex', gap: '5px', marginBottom: '8px', flexWrap: 'wrap' });
@@ -1208,6 +1225,40 @@
     Object.assign(igRow.style, { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' });
     igRow.append(igSave, igStat);
     settings.append(igLabel, igTa, igRow);
+
+    // интерфейс: скрытие в fullscreen, прозрачность, хоткей
+    const uiHead = document.createElement('div');
+    uiHead.textContent = 'Интерфейс:';
+    Object.assign(uiHead.style, { fontSize: '10px', color: 'var(--muted)', margin: '12px 0 4px' });
+    const fsChk = document.createElement('input');
+    fsChk.type = 'checkbox';
+    fsChk.checked = !!UI_CFG.fsHide;
+    fsChk.style.accentColor = 'var(--accent)';
+    const fsLbl = document.createElement('span');
+    fsLbl.textContent = 'скрывать кнопку и панель в полноэкранном режиме (видео, F11)';
+    Object.assign(fsLbl.style, { fontSize: '10px', color: 'var(--txt)' });
+    const fsRow = document.createElement('label');
+    Object.assign(fsRow.style, { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', cursor: 'pointer' });
+    fsRow.append(fsChk, fsLbl);
+    fsChk.onchange = () => { UI_CFG.fsHide = fsChk.checked; saveUi(); syncVisibility(); };
+    const mkUiSel = (key, label, opts) => {
+      const row = document.createElement('label');
+      Object.assign(row.style, { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', fontSize: '10px', color: 'var(--txt)' });
+      const sp = document.createElement('span'); sp.textContent = label;
+      const sel = document.createElement('select');
+      opts.forEach(([v, t]) => { const o = document.createElement('option'); o.value = String(v); o.textContent = t; sel.append(o); });
+      sel.value = String(UI_CFG[key]);
+      Object.assign(sel.style, { background: 'var(--list)', border: '1px solid var(--border-soft)', borderRadius: '6px', color: 'var(--txt)', font: 'inherit', fontSize: '10px', padding: '2px 4px' });
+      sel.onchange = () => { UI_CFG[key] = +sel.value; saveUi(); applyUiCfg(); };
+      row.append(sp, sel);
+      return row;
+    };
+    const pillSelRow = mkUiSel('pillOp', 'Прозрачность кнопки (в покое):', [[100, 'обычная'], [70, '70%'], [40, '40%'], [20, 'почти невидима']]);
+    const panelSelRow = mkUiSel('panelOp', 'Прозратность панели (в покое):', [[100, 'обычная'], [85, '85%'], [70, '70%']]);
+    const hkHint = document.createElement('div');
+    hkHint.textContent = 'Alt+Shift+D — быстро скрыть/показать всю панель и кнопку (работает и без настроек).';
+    Object.assign(hkHint.style, { fontSize: '10px', color: 'var(--muted)', marginTop: '4px' });
+    settings.append(uiHead, fsRow, pillSelRow, panelSelRow, hkHint);
 
     gearBtn.onclick = () => {
       const show = settings.style.display === 'none';
@@ -1286,6 +1337,7 @@
       hLine('По умолчанию показываются только домены, которые страница реально загружала. Чип «Только трафик» переключает: появятся домены-ссылки — приглушённые строки с бейджем «ссылка» внизу списка (результаты поиска, футеры, README — страница их не загружала).'),
       hLine('Строка поиска над списком — живой фильтр по подстроке (Esc — очистить).'),
       hLine('Шапку можно тащить мышью — позиция запоминается.'),
+      hLine('Alt+Shift+D — быстро скрыть/показать скрипт. В ⚙ есть автоскрытие в полноэкранном режиме и прозрачность кнопки/панели.'),
       hLine('Список доменов и статусы сохраняются при переходах по сайту (до закрытия вкладки).'),
     );
 
@@ -1539,7 +1591,20 @@
     };
     renderFn = render;
 
-    const syncVisibility = () => { pill.style.display = isOpen ? 'none' : 'flex'; box.style.display = isOpen ? 'flex' : 'none'; };
+    const syncVisibility = () => {
+      const hideAll = uiHidden || (UI_CFG.fsHide && document.fullscreenElement);
+      pill.style.display = (!hideAll && !isOpen) ? 'flex' : 'none';
+      box.style.display = (!hideAll && isOpen) ? 'flex' : 'none';
+    };
+    // хоткей Alt+Shift+D — скрыть/показать весь UI (не зависит от раскладки: e.code)
+    window.addEventListener('keydown', (e) => {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyD') {
+        e.preventDefault();
+        uiHidden = !uiHidden;
+        syncVisibility();
+      }
+    });
+    document.addEventListener('fullscreenchange', syncVisibility);
     pill.onclick = () => { isOpen = true; setOpen(true); syncVisibility(); if (ROUTE.ok) startRoutePolling(); render(); };
     helpBtn.onclick = () => { showHelp = !showHelp; render(); };
     themeBtn.onclick = () => { theme = theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto'; try { gmSet(THEME_KEY, theme); } catch {} applyTheme(); };
@@ -1593,6 +1658,7 @@
       }
     } catch {}
     syncVisibility();
+    applyUiCfg();
     render();
     if (hasGM) { detectRoute(); echoCheck(); } // найти Clash API (ПК/роутер) и выходной IP
     renderSoon(); // дорисовать после restore и т.п.
