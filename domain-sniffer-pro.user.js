@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.13
+// @version      4.14
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -165,6 +165,7 @@
   let linkOnly = (() => { try { return gmGet('__dsnf3_linkonly', true) !== false; } catch { return true; } })(); // по умолчанию «Только трафик»
   let statusMsg = '';
   const SANITY = { t: 0, ok: [], fail: [] }; // контрольные точки последней «Проверить»
+  let showResultFn = null; // карточка результата (создаётся в initUI) — важные результаты не исчезают
 
   // пользовательский игнор-лист (маски с *) и режим сбора ссылок со страницы
   const parseIgnore = (txt) => String(txt || '').split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#'));
@@ -762,8 +763,7 @@
             st.reg = { counts: old.c, total: old.n, winner: old.w, cached: true };
           } else {
             st.regErr = failMsg;
-            statusMsg = 'Регион-чек ' + host + ': ' + failMsg + ' — сервис перегружен, попробуйте позже'; renderSoon();
-            setTimeout(() => { if (statusMsg.indexOf('Регион-чек') === 0) { statusMsg = ''; renderSoon(); } }, 12000);
+            if (showResultFn) showResultFn('Регион-чек ' + host + ': ' + failMsg + ' — сервис перегружен, попробуйте позже');
             setTimeout(() => { delete st.regErr; renderSoon(); }, 12000);
           }
         }
@@ -858,8 +858,9 @@
     } else {
       msg = 'Доступность зарубежных хостингов: все ' + aliveN + ' проверенных хостингов доступны, обрывов передачи нет — «заморозка» у вашего провайдера не применяется. ' + TSPU.last;
     }
-    statusMsg = msg; renderSoon();
-    setTimeout(() => { if (statusMsg === msg) { statusMsg = ''; renderSoon(); } }, 30000);
+    statusMsg = ''; // результат — в карточке, не в статус-строке
+    if (showResultFn) showResultFn(msg);
+    renderSoon();
   };
 
   // ────────────────── DNS-OVER-HTTPS (узнать IP домена) ──────────────────
@@ -1074,9 +1075,8 @@
       statusMsg = ''; renderSoon();
     }
     if (SANITY.fail && SANITY.fail.length) {
-      statusMsg = 'Контрольные точки недоступны (' + SANITY.fail.join(', ') + ') — проверка всё равно пройдёт, но результаты могут быть недостоверны';
+      if (showResultFn) showResultFn('Контрольные точки недоступны (' + SANITY.fail.join(', ') + ') — проверка всё равно пройдёт, но результаты могут быть недостоверны. Проверьте свою сеть и VPN.');
       renderSoon();
-      setTimeout(() => { if (statusMsg.indexOf('Контрольные точки') === 0) { statusMsg = ''; renderSoon(); } }, 15000);
     }
     const list = [...domains.keys()].filter((h) => { const s = info.get(h); return !(s && s.status); });
     for (const h of list) if (!queue.includes(h)) queue.push(h);
@@ -1475,6 +1475,7 @@
       hLine('клик по остальной строке — перепроверить один домен · число справа — задержка в мс'),
       hLine('По умолчанию показываются только домены, которые страница реально загружала. Чип «Только трафик» переключает: появятся домены-ссылки — приглушённые строки с бейджем «ссылка» внизу списка (результаты поиска, футеры, README — страница их не загружала).'),
       hLine('Строка поиска над списком — живой фильтр по подстроке (Esc — очистить).'),
+      hLine('Результаты «Доступности хостингов» и предупреждения показываются в карточке под списком и не исчезают сами — закрыть её можно крестиком.'),
       hLine('Шапку можно тащить мышью. По умолчанию панель всегда открывается справа снизу; в ⚙ можно включить «Запоминать перетаскивание». Панель всегда вписывается в экран.'),
       hLine('Alt+Shift+D — быстро скрыть/показать скрипт. В ⚙ есть автоскрытие в полноэкранном режиме и прозрачность кнопки/панели.'),
       hLine('Список доменов и статусы сохраняются при переходах по сайту (до закрытия вкладки).'),
@@ -1487,6 +1488,20 @@
     const routebar = document.createElement('div');
     Object.assign(routebar.style, { marginTop: '2px', fontSize: '10px', lineHeight: '1.5', color: 'var(--accent)' });
     routebar.title = 'Маршрутизация: кто идёт через прокси, кто напрямую. Без Clash API — только внешний IP/сплит';
+
+    // карточка важных результатов (тест провайдера, предупреждения) — не исчезает, закрывается крестиком
+    const resBar = document.createElement('div');
+    Object.assign(resBar.style, { display: 'none', marginTop: '8px', background: 'var(--chip)', border: '1px solid var(--accent)', borderRadius: '10px', padding: '8px 10px', fontSize: '11px', lineHeight: '1.5', color: 'var(--txt)', alignItems: 'flex-start', gap: '8px' });
+    const resTxt = document.createElement('div');
+    Object.assign(resTxt.style, { flex: '1 1 auto', overflowWrap: 'anywhere' });
+    const resX = document.createElement('span');
+    resX.textContent = '✕';
+    resX.title = 'Скрыть результат';
+    Object.assign(resX.style, { flex: '0 0 auto', cursor: 'pointer', opacity: '.6', fontSize: '11px' });
+    resX.onmouseenter = () => { resX.style.opacity = '1'; };
+    resX.onmouseleave = () => { resX.style.opacity = '.6'; };
+    resX.onclick = () => { resBar.style.display = 'none'; };
+    resBar.append(resTxt, resX);
 
     // копирование в буфер (Clipboard API + запасной textarea); feedback — в статус-строке
     const copyText = async (text) => {
@@ -1728,6 +1743,8 @@
       if (routebar.textContent !== rtxt) routebar.textContent = rtxt;
       const st = defaultStatus();
       if (statusbar.textContent !== st) statusbar.textContent = st;
+      // важные переходные статусы подсвечиваются, рутинные остаются серыми
+      statusbar.style.color = statusMsg ? 'var(--accent)' : 'var(--muted)';
       // тултип: последняя проверка хостингов или подсказка про отмену регион-чека
       const sbTitle = TSPU.last ? 'Последняя проверка хостингов — ' + TSPU.last : 'Во время регион-чека: клик здесь — отменить';
       if (statusbar.title !== sbTitle) statusbar.title = sbTitle;
@@ -1735,6 +1752,13 @@
       if (tspuBtn.title !== tbTitle) tspuBtn.title = tbTitle;
     };
     renderFn = render;
+
+    const showResult = (text) => {
+      resTxt.textContent = text;
+      resBar.style.display = 'flex';
+      renderSoon();
+    };
+    showResultFn = showResult;
 
     const syncVisibility = () => {
       const hideAll = uiHidden || (UI_CFG.fsHide && document.fullscreenElement);
@@ -1794,7 +1818,7 @@
 
     btnGroup.append(reloadBtn, gearBtn, helpBtn, themeBtn, clearBtn, minBtn);
     actionRow.append(checkBtn, chbBtn, tspuBtn, copyBtn, probBtn, modeBtn);
-    box.append(header, actionRow, filters, searchIn, list, help, statusbar, routebar, settings);
+    box.append(header, actionRow, filters, searchIn, list, help, resBar, statusbar, routebar, settings);
     document.documentElement.append(pill, box);
     // анимация пульсации точки «проверка» + восстановление сохранённой позиции панели
     if (!document.getElementById('__dsnf3_style')) {
