@@ -12,7 +12,7 @@
 [Обновления](#-обновления) ·
 [Приватность](#-приватность)
 
-[![Установить](https://img.shields.io/badge/Установить-в_один_клик-009688?style=for-the-badge)](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.10/domain-sniffer-pro.user.js)
+[![Установить](https://img.shields.io/badge/Установить-в_один_клик-009688?style=for-the-badge)](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.11/domain-sniffer-pro.user.js)
 [![Releases](https://img.shields.io/badge/Скачать-GitHub_Releases-181717?style=for-the-badge)](https://github.com/Kakuzaaa/sniff/releases/latest)
 [![Raw](https://img.shields.io/badge/Прямая_ссылка-GitHub_Raw-0969DA?style=for-the-badge)](https://raw.githubusercontent.com/Kakuzaaa/sniff/main/domain-sniffer-pro.user.js)
 </div>
@@ -27,7 +27,7 @@
 ### Способ 1 — в один клик (рекомендуется)
 
 1. Установите загрузчик юзерскриптов (ссылки выше)
-2. Откройте **[ссылку установки](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.10/domain-sniffer-pro.user.js)** — менеджер сам предложит установить скрипт
+2. Откройте **[ссылку установки](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.11/domain-sniffer-pro.user.js)** — менеджер сам предложит установить скрипт
 3. Подтвердите запрос доступа ко всем сайтам (нужен для перехвата запросов сайта и живых проверок блокировок)
 
 > Ссылка ведёт на зафиксированный релиз-тег `v4.2` — CDN jsDelivr доступнее в РФ, чем GitHub raw, и у тега нет кэш-задержки. Обновления приходят автоматически — [подробнее](#-обновления).
@@ -45,7 +45,7 @@
 
 ### Способ 3 — ручная установка (всегда работает)
 
-1. Откройте [файл скрипта](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.10/domain-sniffer-pro.user.js) и скопируйте всё (`Ctrl+A` → `Ctrl+C`)
+1. Откройте [файл скрипта](https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.11/domain-sniffer-pro.user.js) и скопируйте всё (`Ctrl+A` → `Ctrl+C`)
 2. Иконка Tampermonkey → «Юзерскрипты» → вкладка «+» → вставьте (`Ctrl+V`) → сохраните (`Ctrl+S`)
 
 ### Способ 4 — импорт по URL
@@ -53,7 +53,7 @@
 Иконка Tampermonkey → **«Утилиты»** → «Импорт из URL» → вставьте:
 
 ```
-https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.10/domain-sniffer-pro.user.js
+https://cdn.jsdelivr.net/gh/Kakuzaaa/sniff@v4.11/domain-sniffer-pro.user.js
 ```
 
 → «Установить».

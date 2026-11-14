@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.10
+// @version      4.11
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -830,7 +830,7 @@
   });
 
   // ────────────────── TSPU-ТЕСТ ПРОВАЙДЕРА (по suite.json hyperion-cs/dpi-checkers) ──────────────────
-  const TSPU = { busy: false };
+  const TSPU = { busy: false, last: '' };
   const runTspuTest = async () => {
     if (!hasGM || TSPU.busy) return;
     TSPU.busy = true;
@@ -842,17 +842,23 @@
       return { p, st: (post.kind === 'timeout' || post.kind === 'abort') ? 'cut' : 'ok' };
     }));
     const cut = res.filter((r) => r.st === 'cut').map((r) => r.p);
+    const dead = res.filter((r) => r.st === 'dead').map((r) => r.p);
     const aliveN = res.filter((r) => r.st !== 'dead').length;
     TSPU.busy = false;
-    statusMsg = aliveN === 0
-      ? 'TSPU-тест: все тестовые хосты недоступны — проверьте сеть'
-      : cut.length >= 2
-        ? 'TSPU 16-20: ПОДТВЕРЖДЁН на ' + cut.length + '/' + aliveN + ' подсетях (' + cut.join(', ') + ') — провайдер режет исходящий поток'
-        : cut.length === 1
-          ? 'TSPU 16-20: единичное срабатывание (' + cut[0] + ') — похоже, провайдер режет'
-          : 'TSPU 16-20: не обнаружен на ' + aliveN + ' подсетях — исходящий поток не режется';
-    renderSoon();
-    setTimeout(() => { if (statusMsg.indexOf('TSPU') === 0) { statusMsg = ''; renderSoon(); } }, 20000);
+    // детализация по каждой подсети — показывается в тултипе статус-бара и кнопки
+    TSPU.last = 'детализация: ' + res.map((r) => r.p + ' — ' + (r.st === 'cut' ? 'ОБРЕЗАН (заморозка)' : r.st === 'dead' ? 'недоступен' : 'прошёл')).join('; ');
+    let msg;
+    if (aliveN === 0) {
+      msg = 'TSPU-тест: все хосты недоступны — проверьте сеть/VPN. ' + TSPU.last;
+    } else if (cut.length >= 2) {
+      msg = 'TSPU 16-20 ПОДТВЕРЖДЁН: ваш провайдер режет исходящий поток на ' + cut.length + '/' + aliveN + ' подсетях (' + cut.join(', ') + '). Сайты на этих хостингах будут виснуть на больших передачах. ' + TSPU.last;
+    } else if (cut.length === 1) {
+      msg = 'TSPU 16-20 замечен только на подсети ' + cut[0] + ': она заморожена у вашего провайдера, остальные проходят. Сайты, хостящиеся там, будут виснуть. Повторите тест — результат должен повториться (если нет — хост просто был медленным). ' + TSPU.last;
+    } else {
+      msg = 'TSPU 16-20 не обнаружен: ' + aliveN + ' подсетей прошли POST 64КБ — исходящий поток у вашего провайдера не режется. ' + TSPU.last;
+    }
+    statusMsg = msg; renderSoon();
+    setTimeout(() => { if (statusMsg === msg) { statusMsg = ''; renderSoon(); } }, 30000);
   };
 
   // ────────────────── DNS-OVER-HTTPS (узнать IP домена) ──────────────────
@@ -1717,6 +1723,11 @@
       if (routebar.textContent !== rtxt) routebar.textContent = rtxt;
       const st = defaultStatus();
       if (statusbar.textContent !== st) statusbar.textContent = st;
+      // тултип: последний TSPU-тест или подсказка про отмену регион-чека
+      const sbTitle = TSPU.last ? 'Последний TSPU-тест — ' + TSPU.last : 'Во время регион-чека: клик здесь — отменить';
+      if (statusbar.title !== sbTitle) statusbar.title = sbTitle;
+      const tbTitle = TSPU.last ? 'TSPU-тест (клик — повторить). Последний результат: ' + TSPU.last : 'Тест: режет ли ваш провайдер исходящий поток 16-20КБ — POST 64КБ на 5 крупных подсетях (~15с)';
+      if (tspuBtn.title !== tbTitle) tspuBtn.title = tbTitle;
     };
     renderFn = render;
 
