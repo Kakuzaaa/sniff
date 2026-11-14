@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.7
+// @version      4.8
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -1124,13 +1124,19 @@
       box.style.left = r.left + 'px'; box.style.top = r.top + 'px';
       box.style.right = 'auto'; box.style.bottom = 'auto';
       const move = (ev) => {
-        const x = Math.max(10 - r.width, Math.min(ev.clientX - sx, window.innerWidth - 10));
-        const y = Math.max(0, Math.min(ev.clientY - sy, window.innerHeight - 44));
+        // тащить можно только в пределах экрана — панель не уйдёт за край
+        const x = Math.max(4, Math.min(ev.clientX - sx, window.innerWidth - r.width - 4));
+        const y = Math.max(8, Math.min(ev.clientY - sy, window.innerHeight - r.height - 8));
         box.style.left = x + 'px'; box.style.top = y + 'px';
       };
       const up = () => {
         document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
-        try { const rr = box.getBoundingClientRect(); gmSet('__dsnf3_pos', { x: Math.round(rr.left), y: Math.round(rr.top) }); } catch {}
+        try {
+          if (UI_CFG.pos === 'remember') {
+            const rr = box.getBoundingClientRect();
+            gmSet('__dsnf3_pos', { x: Math.round(Math.max(4, rr.left)), y: Math.round(Math.max(8, rr.top)) });
+          }
+        } catch {}
       };
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
     };
@@ -1149,7 +1155,7 @@
     applyTheme();
 
     // настройки интерфейса: автоскрытие в fullscreen, прозрачность в покое, хоткей
-    const UI_CFG = (() => { try { return Object.assign({ fsHide: true, pillOp: 100, panelOp: 100 }, gmGet('__dsnf3_ui', {}) || {}); } catch { return { fsHide: true, pillOp: 100, panelOp: 100 }; } })();
+    const UI_CFG = (() => { try { return Object.assign({ fsHide: true, pillOp: 100, panelOp: 100, pos: 'corner' }, gmGet('__dsnf3_ui', {}) || {}); } catch { return { fsHide: true, pillOp: 100, panelOp: 100, pos: 'corner' }; } })();
     let uiHidden = false; // полное скрытие по Alt+Shift+D
     const saveUi = () => { try { gmSet('__dsnf3_ui', UI_CFG); } catch {} };
     const applyUiCfg = () => {
@@ -1254,11 +1260,15 @@
       return row;
     };
     const pillSelRow = mkUiSel('pillOp', 'Прозрачность кнопки (в покое):', [[100, 'обычная'], [70, '70%'], [40, '40%'], [20, 'почти невидима']]);
-    const panelSelRow = mkUiSel('panelOp', 'Прозратность панели (в покое):', [[100, 'обычная'], [85, '85%'], [70, '70%']]);
+    const panelSelRow = mkUiSel('panelOp', 'Прозрачность панели (в покое):', [[100, 'обычная'], [85, '85%'], [70, '70%']]);
+    const posSelRow = mkUiSel('pos', 'Положение панели:', [['corner', 'Всегда справа снизу'], ['remember', 'Запоминать перетаскивание']]);
+    const posSel = posSelRow.querySelector('select');
+    posSel.value = UI_CFG.pos;
+    posSel.onchange = () => { UI_CFG.pos = posSel.value; saveUi(); syncVisibility(); };
     const hkHint = document.createElement('div');
     hkHint.textContent = 'Alt+Shift+D — быстро скрыть/показать всю панель и кнопку (работает и без настроек).';
     Object.assign(hkHint.style, { fontSize: '10px', color: 'var(--muted)', marginTop: '4px' });
-    settings.append(uiHead, fsRow, pillSelRow, panelSelRow, hkHint);
+    settings.append(uiHead, fsRow, pillSelRow, panelSelRow, posSelRow, hkHint);
 
     gearBtn.onclick = () => {
       const show = settings.style.display === 'none';
@@ -1336,7 +1346,7 @@
       hLine('клик по остальной строке — перепроверить один домен · число справа — задержка в мс'),
       hLine('По умолчанию показываются только домены, которые страница реально загружала. Чип «Только трафик» переключает: появятся домены-ссылки — приглушённые строки с бейджем «ссылка» внизу списка (результаты поиска, футеры, README — страница их не загружала).'),
       hLine('Строка поиска над списком — живой фильтр по подстроке (Esc — очистить).'),
-      hLine('Шапку можно тащить мышью — позиция запоминается.'),
+      hLine('Шапку можно тащить мышью. По умолчанию панель всегда открывается справа снизу; в ⚙ можно включить «Запоминать перетаскивание». Панель всегда вписывается в экран.'),
       hLine('Alt+Shift+D — быстро скрыть/показать скрипт. В ⚙ есть автоскрытие в полноэкранном режиме и прозрачность кнопки/панели.'),
       hLine('Список доменов и статусы сохраняются при переходах по сайту (до закрытия вкладки).'),
     );
@@ -1595,6 +1605,13 @@
       const hideAll = uiHidden || (UI_CFG.fsHide && document.fullscreenElement);
       pill.style.display = (!hideAll && !isOpen) ? 'flex' : 'none';
       box.style.display = (!hideAll && isOpen) ? 'flex' : 'none';
+      if (isOpen && !hideAll) {
+        if (UI_CFG.pos === 'corner') { // предсказуемое место по умолчанию
+          box.style.left = ''; box.style.top = '';
+          box.style.right = '14px'; box.style.bottom = '14px';
+        }
+        requestAnimationFrame(clampPanel); // в любом случае — вписать в экран
+      }
     };
     // хоткей Alt+Shift+D — скрыть/показать весь UI (не зависит от раскладки: e.code)
     window.addEventListener('keydown', (e) => {
@@ -1651,9 +1668,9 @@
     }
     try {
       const p = gmGet('__dsnf3_pos', null);
-      if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-        box.style.left = Math.max(0, Math.min(p.x, window.innerWidth - 100)) + 'px';
-        box.style.top = Math.max(0, Math.min(p.y, window.innerHeight - 60)) + 'px';
+      if (UI_CFG.pos === 'remember' && p && typeof p.x === 'number' && typeof p.y === 'number') {
+        box.style.left = Math.max(4, Math.min(p.x, window.innerWidth - 100)) + 'px';
+        box.style.top = Math.max(8, Math.min(p.y, window.innerHeight - 60)) + 'px';
         box.style.right = 'auto'; box.style.bottom = 'auto';
       }
     } catch {}
