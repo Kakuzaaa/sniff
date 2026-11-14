@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Domain Sniffer Pro — сбор доменов + детектор блокировок (РФ)
 // @namespace    http://tampermonkey.net/
-// @version      4.14
+// @version      4.15
 // @description  Сбор доменов/поддоменов + блокировки (реестр, DPI, IP, ~16-20КБ) + маршрут (прокси/напрямую, Clash API) + региональная проверка по РФ через cheburcheck.ru (SNI/ТСПУ/DNS/CDN-блок по регионам)
 // @match        *://*/*
 // @run-at       document-start
@@ -122,7 +122,7 @@
       probeTtlMs: 6 * 60 * 60 * 1000, // кэш живого скана на домен
       probeTimeoutMs: 180000,         // SSE-скан идёт ~60-90с
     },
-    sanity: { hosts: ['ya.ru', 'vk.com', 'sberbank.com'], ttl: 10 * 60 * 1000 }, // контрольные точки достоверности
+    sanity: { hosts: ['ya.ru', 'vk.com', 'gosuslugi.ru'], ttl: 10 * 60 * 1000 }, // контрольные точки достоверности (работают отовсюду)
     post16TimeoutMs: 10000, // POST 64КБ: таймаут = TSPU обрезает исходящий поток
     tspu: { timeoutMs: 10000, hosts: [ // тестовые хосты на подсетях крупных провайдеров (из suite.json hyperion-cs)
       { p: 'Cloudflare', h: 'img.wzstats.gg' },
